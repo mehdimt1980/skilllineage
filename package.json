@@ -14,13 +14,13 @@
     "dist"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsc",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && python -m unittest tools/test_benchmark_gitskills.py",
     "test:watch": "vitest",
     "prepack": "npm run build"
   },

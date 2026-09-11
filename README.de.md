@@ -1,5 +1,7 @@
 # SkillLineage
 
+[![CI](https://github.com/mehdimt1980/skilllineage/actions/workflows/ci.yml/badge.svg)](https://github.com/mehdimt1980/skilllineage/actions/workflows/ci.yml)
+
 **Kopien, Varianten und Herkunftshinweise von AI Agent Skills nachvollziehen.**
 
 [English](README.md) | **Deutsch**
@@ -60,6 +62,8 @@ exakt gleicher Rohinhalt
     ↓
 gleiche normalisierte Instructions
     ↓
+Kandidaten mit hoher textueller Ähnlichkeit
+    ↓
 kein Treffer
 ```
 
@@ -97,22 +101,23 @@ Implementiert:
 - [x] GitSkills-basierter Index-Builder
 - [x] globaler Exact-Trace
 - [x] globaler Same-Instructions-Trace
+- [x] approximative globale Suche nach Varianten-Kandidaten
+- [x] GitHub-Actions-CI mit Node.js 22 und 24
+- [x] manueller Benchmark für echte GitSkills-Daten
 
 Geplant:
 
-- [ ] approximative globale Suche nach Varianten-Kandidaten
-- [ ] Benchmarking von Indexgröße und Lookup-Performance mit realen GitSkills-Daten
+- [ ] parameterbezogene Optimierung anhand realer Benchmark-Ergebnisse
 - [ ] reichhaltigere Lineage-Evidenz anhand der Repository-Historie
 - [ ] Origin-Inference mit expliziten Confidence- und Evidenzregeln
-- [ ] GitHub-Action-/CI-Integration
 
 ## Entwicklung
 
 Voraussetzungen:
 
-- Node.js 18+
+- Node.js 22+
 - npm
-- Python 3 für den Offline-GitSkills-Index-Builder
+- Python 3.13 für den Offline-GitSkills-Index-Builder und die Benchmark-Harness
 
 Abhängigkeiten installieren:
 
@@ -147,9 +152,31 @@ src/
 
 tools/
   build-gitskills-index.py
+  benchmark-gitskills.py
+  run-trace-benchmark.mjs
 ```
 
 Die Analyse-Engines sind bewusst von der CLI-Darstellung getrennt, damit sie später auch in CI, GitHub Actions oder anderen Anwendungen wiederverwendet werden können.
+
+## Continuous Integration
+
+GitHub Actions führt Linting, Type-Checks, synthetische Tests und den Build unter Ubuntu mit Node.js 22 und 24 sowie Python 3.13 aus. Ein zusätzlicher Windows-Job führt Tests und Build mit Node.js 24 und Python 3.13 aus, um Dateisystem- und Pfadregressionen zu erkennen. Die CI besitzt ausschließlich Leserechte und lädt weder GitSkills herunter noch führt sie Benchmarks mit Echtdaten aus.
+
+## Benchmarking mit GitSkills
+
+Der Benchmark mit Echtdaten wird ausschließlich manuell ausgeführt. Er benötigt eine lokale GitSkills-SQLite-Datenbank, einen bereits erzeugten SkillLineage-Index und ein kompiliertes `dist/`-Verzeichnis:
+
+```bash
+npm run build
+python tools/benchmark-gitskills.py \
+  --db /pfad/zu/gitskills.db \
+  --index /pfad/zum/skilllineage-index \
+  --samples 100 \
+  --seed 42 \
+  --output benchmark-report.json
+```
+
+Die Harness zieht deterministische Stichproben realer Skills und misst Indexgröße, In-Process-Trace-Latenz, Exact- und Same-Instructions-Trefferraten sowie Recall@1/3/10 für kontrollierte leichte und mittlere Mutationen. Sie verändert oder lädt den Quelldatensatz nicht herunter und läuft nicht in der CI. `--keep-temp` dient ausschließlich der gezielten Untersuchung erzeugter Fixtures.
 
 ## GitSkills-Hinweis
 
