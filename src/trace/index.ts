@@ -5,5 +5,8 @@ export type {
   TraceMatch,
   ExactMatch,
   SameInstructionsMatch,
+  VariantCandidatesMatch,
+  VariantCandidate,
+  VariantCandidateExample,
   NoneMatch,
 } from "./types.js";

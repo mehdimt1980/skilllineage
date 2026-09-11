@@ -14,7 +14,10 @@ import type {
   IndexManifest,
   IndexShard,
   InstructionShard,
+  SketchShard,
+  AnchorShard,
 } from "../index/types.js";
+import { instructionSketch, variantIdFromInstructionsSha256 } from "../variant/index.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,6 +66,15 @@ function validManifest(): IndexManifest {
       indexedDistinctContentCount: 1,
       skippedDistinctContentCount: 0,
     },
+    variantIndex: {
+      algorithm: "bottom-k-token-shingles-v1",
+      shingleSize: 5,
+      shingleHash: "sha256-96",
+      sketchSize: 32,
+      anchorCount: 8,
+      maxAnchorPostings: 2000,
+      skippedHotAnchorCount: 0,
+    },
   };
 }
 
@@ -74,6 +86,8 @@ function instrHex(content: string): string {
 interface TestIndex {
   exactShards?: Record<string, IndexShard>;
   instrShards?: Record<string, InstructionShard>;
+  sketchShards?: Record<string, SketchShard>;
+  anchorShards?: Record<string, AnchorShard>;
   manifest?: IndexManifest;
 }
 
@@ -88,8 +102,12 @@ async function makeIndex(opts: TestIndex = {}): Promise<string> {
 
   const exactDir = path.join(dir, "exact");
   const instrDir = path.join(dir, "instructions");
+  const sketchDir = path.join(dir, "variants", "sketches");
+  const anchorDir = path.join(dir, "variants", "anchors");
   await mkdir(exactDir, { recursive: true });
   await mkdir(instrDir, { recursive: true });
+  await mkdir(sketchDir, { recursive: true });
+  await mkdir(anchorDir, { recursive: true });
 
   // Write all 256 exact shards (empty by default, override with exactShards)
   for (let i = 0; i < 256; i++) {
@@ -105,6 +123,10 @@ async function makeIndex(opts: TestIndex = {}): Promise<string> {
     const data = opts.instrShards?.[pfx] ?? {};
     const gz = gzipSync(Buffer.from(JSON.stringify(data, null, 2), "utf-8"));
     await writeFile(path.join(instrDir, `${pfx}.json.gz`), gz);
+    const sketchGz = gzipSync(Buffer.from(JSON.stringify(opts.sketchShards?.[pfx] ?? {}), "utf-8"));
+    const anchorGz = gzipSync(Buffer.from(JSON.stringify(opts.anchorShards?.[pfx] ?? {}), "utf-8"));
+    await writeFile(path.join(sketchDir, `${pfx}.json.gz`), sketchGz);
+    await writeFile(path.join(anchorDir, `${pfx}.json.gz`), anchorGz);
   }
 
   return dir;
@@ -175,8 +197,10 @@ describe("exact match", () => {
     expect(report.schemaVersion).toBe("0.1");
     expect(report.query.gitBlobSha1).toBe(`sha1:${blobHash}`);
     expect(report.match.type).toBe("exact");
-    expect(report.match.copyCount).toBe(2);
-    expect(report.match.occurrences).toHaveLength(2);
+    if (report.match.type === "exact") {
+      expect(report.match.copyCount).toBe(2);
+      expect(report.match.occurrences).toHaveLength(2);
+    }
     expect(report.origin.status).toBe("not_inferred");
   });
 
@@ -478,6 +502,63 @@ describe("same_instructions match", () => {
   });
 });
 
+describe("variant_candidates match", () => {
+  it("returns approximate candidates with deterministic capped examples", async () => {
+    const indexed = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen\n";
+    const local = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen changed\n";
+    const skillDir = await makeTempSkill({ "SKILL.md": local });
+    const indexedBlob = computeGitBlobSha1(Buffer.from(indexed, "utf-8")).replace(/^sha1:/, "");
+    const fullInstructionHash = instrHex(indexed);
+    const variantId = variantIdFromInstructionsSha256(fullInstructionHash);
+    const candidateSketch = instructionSketch(normalizeInstructions(indexed));
+    const localSketch = instructionSketch(normalizeInstructions(local));
+    const sharedAnchors = localSketch.slice(0, 8).filter((anchor) => candidateSketch.includes(anchor));
+    expect(sharedAnchors.length).toBeGreaterThanOrEqual(2);
+
+    const anchorShards: Record<string, AnchorShard> = {};
+    for (const anchor of sharedAnchors) {
+      const prefix = anchor.slice(0, 2);
+      anchorShards[prefix] ??= {};
+      anchorShards[prefix][anchor] = [variantId];
+    }
+    const occurrences = [
+      { ...OCCURRENCE_A, repoFullName: "low/repo", stars: 1 },
+      { ...OCCURRENCE_B, repoFullName: "null/repo", stars: null },
+      { ...OCCURRENCE_C, repoFullName: "top/repo", stars: 900 },
+      { ...OCCURRENCE_C, repoFullName: "mid/repo", stars: 50, path: "mid/SKILL.md" },
+    ];
+    const indexDir = await makeIndex({
+      exactShards: {
+        [indexedBlob.slice(0, 2)]: {
+          [indexedBlob]: { copyCount: 4, occurrences },
+        },
+      },
+      instrShards: {
+        [fullInstructionHash.slice(0, 2)]: {
+          [fullInstructionHash]: [indexedBlob],
+        },
+      },
+      sketchShards: {
+        [variantId.slice(0, 2)]: {
+          [variantId]: { instructionsSha256: fullInstructionHash, sketch: candidateSketch },
+        },
+      },
+      anchorShards,
+    });
+
+    const report = await traceSkill(skillDir, indexDir, TOOL_VERSION);
+    expect(report.match.type).toBe("variant_candidates");
+    if (report.match.type === "variant_candidates") {
+      expect(report.match.approximate).toBe(true);
+      expect(report.match.method).toBe("bottom-k-token-shingles-v1");
+      expect(report.match.candidates).toHaveLength(1);
+      expect(report.match.candidates[0].examples).toHaveLength(3);
+      expect(report.match.candidates[0].examples.map((example) => example.stars)).toEqual([900, 50, 1]);
+    }
+    expect(report.origin.status).toBe("not_inferred");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // None match
 // ---------------------------------------------------------------------------
@@ -494,8 +575,10 @@ describe("none match", () => {
     const report = await traceSkill(skillDir, indexDir, TOOL_VERSION);
 
     expect(report.match.type).toBe("none");
-    expect(report.match.copyCount).toBe(0);
-    expect(report.match.occurrences).toEqual([]);
+    if (report.match.type === "none") {
+      expect(report.match.copyCount).toBe(0);
+      expect(report.match.occurrences).toEqual([]);
+    }
   });
 
   it("unrelated instructions return none", async () => {

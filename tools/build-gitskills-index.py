@@ -202,7 +202,7 @@ def main():
     sketches_dir.mkdir(parents=True, exist_ok=True)
     anchors_dir.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
 
     # Use a temp file for the instruction-mapping SQLite state
@@ -601,7 +601,7 @@ def _write_variant_sketches(tmp_conn, sketches_dir: Path) -> None:
         }
     if current_prefix is not None:
         write_gz_shard(sketches_dir / f"{current_prefix}.json.gz", current_shard)
-    _write_missing_sh﻿(shards_dir=sketches_dir)
+    _write_missing_shards(sketches_dir)
 
 
 def _write_variant_anchors(tmp_conn, anchors_dir: Path) -> int:

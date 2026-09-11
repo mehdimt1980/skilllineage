@@ -56,6 +56,15 @@ function validManifest(
       indexedDistinctContentCount: 1,
       skippedDistinctContentCount: 0,
     },
+    variantIndex: {
+      algorithm: "bottom-k-token-shingles-v1",
+      shingleSize: 5,
+      shingleHash: "sha256-96",
+      sketchSize: 32,
+      anchorCount: 8,
+      maxAnchorPostings: 2000,
+      skippedHotAnchorCount: 0,
+    },
     ...overrides,
   };
 }
@@ -170,6 +179,17 @@ describe("readManifest", () => {
       JSON.stringify([1, 2, 3]),
     );
     await expect(readManifest(dir)).rejects.toThrow("Invalid manifest");
+  });
+
+  it("rejects incompatible variant-index parameters", async () => {
+    const dir = await makeTempDir();
+    await writeManifest(dir, {
+      ...validManifest(),
+      variantIndex: { ...validManifest().variantIndex, sketchSize: 64 },
+    });
+    await expect(readManifest(dir)).rejects.toThrow(
+      "Unsupported variant index parameters",
+    );
   });
 });
 

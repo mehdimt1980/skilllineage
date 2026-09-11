@@ -8,6 +8,11 @@ import { promisify } from "node:util";
 import path from "node:path";
 
 import { normalizeInstructions } from "../fingerprint/index.js";
+import {
+  instructionSketch,
+  shingleHash96,
+  variantIdFromInstructionsSha256,
+} from "../variant/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -249,6 +254,16 @@ describe("256-shard completeness", () => {
       }
     }
   });
+
+  it("builder creates all 256 sketch and anchor shards", async () => {
+    const tmpDir = await makeTempDir();
+    const dbPath = path.join(tmpDir, "test.db");
+    const outDir = path.join(tmpDir, "index");
+    await createTestDb(dbPath, PARITY_FIXTURE);
+    await runBuilder(dbPath, outDir);
+    expect((await readdir(path.join(outDir, "variants", "sketches"))).filter((f) => f.endsWith(".json.gz"))).toHaveLength(256);
+    expect((await readdir(path.join(outDir, "variants", "anchors"))).filter((f) => f.endsWith(".json.gz"))).toHaveLength(256);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -453,6 +468,48 @@ describe("Python/TypeScript normalization parity", () => {
   });
 });
 
+describe("Python/TypeScript variant sketch parity", () => {
+  it("matches hashes, sketches, and variant IDs across canonical edge cases", async () => {
+    const cases = [
+      "Ordinary English instructions have several useful words here.\n",
+      "# Heading\n\nUse commas, periods, and code: `run()`.\n",
+      "---\nname: parity\n---\nOne two three four five six.\n",
+      "One two three four five six.\r\n",
+      "repeat one two three four repeat one two three four\n",
+      "one two three\n",
+      "---\nname: empty\n---\n",
+      "one\ttwo\tthree four five six\n",
+      "one\u00a0two\u2003three\u202ffour five six\n",
+    ];
+    const fixture: TestFixture = {
+      repos: [{ full_name: "parity/repo", stars: 1 }],
+      artifacts: cases.map((content, i) => ({
+        file_sha: i.toString(16).padStart(40, "0"),
+        repo_full_name: "parity/repo",
+        path: `skills/${i}/SKILL.md`,
+        content,
+      })),
+    };
+    const tmpDir = await makeTempDir();
+    const dbPath = path.join(tmpDir, "test.db");
+    const outDir = path.join(tmpDir, "index");
+    await createTestDb(dbPath, fixture);
+    await runBuilder(dbPath, outDir);
+
+    for (const content of cases) {
+      const fullHash = instrSha256(content);
+      const variantId = variantIdFromInstructionsSha256(fullHash);
+      const shard = readGzipShard(await readFile(path.join(
+        outDir, "variants", "sketches", `${variantId.slice(0, 2)}.json.gz`,
+      ))) as Record<string, { instructionsSha256: string; sketch: string[] }>;
+      expect(shard[variantId]).toEqual({
+        instructionsSha256: fullHash,
+        sketch: instructionSketch(normalizeInstructions(content)),
+      });
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Instruction index semantics
 // ---------------------------------------------------------------------------
@@ -617,6 +674,65 @@ describe("exact index", () => {
       Object.prototype.hasOwnProperty.call(eeShard, "ee" + "0".repeat(38)),
     ).toBe(false);
   });
+
+  it("serializes known-null occurrence metadata explicitly", async () => {
+    const tmpDir = await makeTempDir();
+    const dbPath = path.join(tmpDir, "test.db");
+    const outDir = path.join(tmpDir, "index");
+    await createTestDb(dbPath, PARITY_FIXTURE);
+    await runBuilder(dbPath, outDir);
+    const shard = readGzipShard(await readFile(path.join(outDir, "exact", "aa.json.gz"))) as Record<string, { occurrences: Array<Record<string, unknown>> }>;
+    const occurrence = shard[SHA_PLAIN].occurrences[0];
+    for (const field of ["locationClass", "firstCommitAt", "lastCommitAt", "historyFetched"]) {
+      expect(occurrence).toHaveProperty(field, null);
+    }
+  });
+});
+
+describe("variant index", () => {
+  it("contains no source Skill text", async () => {
+    const marker = "SECRET-SOURCE-MARKER";
+    const tmpDir = await makeTempDir();
+    const dbPath = path.join(tmpDir, "test.db");
+    const outDir = path.join(tmpDir, "index");
+    await createTestDb(dbPath, {
+      repos: [{ full_name: "safe/repo", stars: 1 }],
+      artifacts: [{
+        file_sha: "12" + "0".repeat(38), repo_full_name: "safe/repo",
+        path: "SKILL.md", content: `# ${marker}\none two three four five six\n`,
+      }],
+    });
+    await runBuilder(dbPath, outDir);
+    for (const subdir of ["sketches", "anchors"]) {
+      for (const file of await readdir(path.join(outDir, "variants", subdir))) {
+        const text = gunzipSync(await readFile(path.join(outDir, "variants", subdir, file))).toString("utf-8");
+        expect(text).not.toContain(marker);
+      }
+    }
+  });
+
+  it("omits hot anchors and reports their count", async () => {
+    const tmpDir = await makeTempDir();
+    const dbPath = path.join(tmpDir, "test.db");
+    const outDir = path.join(tmpDir, "index");
+    const artifacts = Array.from({ length: 2001 }, (_, i) => ({
+      file_sha: (i + 1).toString(16).padStart(40, "0"),
+      repo_full_name: "hot/repo",
+      path: `skills/${i}/SKILL.md`,
+      content: `common one two three four unique-${i}\n`,
+    }));
+    await createTestDb(dbPath, {
+      repos: [{ full_name: "hot/repo", stars: 1 }], artifacts,
+    });
+    await runBuilder(dbPath, outDir);
+    const anchor = shingleHash96("common one two three four");
+    const shard = readGzipShard(await readFile(path.join(
+      outDir, "variants", "anchors", `${anchor.slice(0, 2)}.json.gz`,
+    )));
+    expect(shard).not.toHaveProperty(anchor);
+    const manifest = JSON.parse(await readFile(path.join(outDir, "manifest.json"), "utf-8")) as { variantIndex: { skippedHotAnchorCount: number } };
+    expect(manifest.variantIndex.skippedHotAnchorCount).toBe(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -657,6 +773,23 @@ describe("determinism", () => {
       const c1 = await readFile(path.join(outDir1, "exact", f));
       const c2 = await readFile(path.join(outDir2, "exact", f));
       expect(c1.equals(c2)).toBe(true);
+    }
+  });
+
+  it("produces byte-identical variant shards across two builds", async () => {
+    const tmpDir = await makeTempDir();
+    const dbPath = path.join(tmpDir, "test.db");
+    const outDir1 = path.join(tmpDir, "index1");
+    const outDir2 = path.join(tmpDir, "index2");
+    await createTestDb(dbPath, PARITY_FIXTURE);
+    await runBuilder(dbPath, outDir1);
+    await runBuilder(dbPath, outDir2);
+    for (const subdir of ["sketches", "anchors"]) {
+      for (const file of await readdir(path.join(outDir1, "variants", subdir))) {
+        const first = await readFile(path.join(outDir1, "variants", subdir, file));
+        const second = await readFile(path.join(outDir2, "variants", subdir, file));
+        expect(first.equals(second)).toBe(true);
+      }
     }
   });
 });

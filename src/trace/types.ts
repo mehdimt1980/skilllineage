@@ -18,7 +18,11 @@ export interface TraceQuery {
   readonly instructionsSha256: string;
 }
 
-export type TraceMatch = ExactMatch | SameInstructionsMatch | NoneMatch;
+export type TraceMatch =
+  | ExactMatch
+  | SameInstructionsMatch
+  | VariantCandidatesMatch
+  | NoneMatch;
 
 export interface ExactMatch {
   readonly type: "exact";
@@ -35,6 +39,29 @@ export interface SameInstructionsMatch {
   /** Sorted list of sha1:-prefixed Git blob hashes. */
   readonly contentHashes: readonly string[];
   readonly occurrences: readonly IndexOccurrence[];
+}
+
+export interface VariantCandidatesMatch {
+  readonly type: "variant_candidates";
+  readonly method: "bottom-k-token-shingles-v1";
+  readonly approximate: true;
+  readonly candidateGenerationTruncated: boolean;
+  readonly candidates: readonly VariantCandidate[];
+}
+
+export interface VariantCandidate {
+  readonly instructionsSha256: string;
+  readonly estimatedSimilarity: number;
+  readonly sharedAnchors: number;
+  readonly rawVariantCount: number;
+  readonly copyCount: number;
+  readonly examples: readonly VariantCandidateExample[];
+}
+
+export interface VariantCandidateExample {
+  readonly repoFullName: string;
+  readonly path: string;
+  readonly stars: number | null;
 }
 
 export interface NoneMatch {

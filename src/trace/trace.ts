@@ -1,15 +1,34 @@
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
+import path from "node:path";
 
-import { fingerprint } from "../fingerprint/index.js";
+import { fingerprint, normalizeInstructions } from "../fingerprint/index.js";
 import {
   readManifest,
   lookupExact,
   lookupInstructions,
   shardPrefix,
   readShard,
+  readInstructionShard,
+  readAnchorShard,
+  readSketchShard,
 } from "../index/index.js";
-import type { IndexOccurrence, IndexHashEntry } from "../index/types.js";
-import type { TraceReport, SameInstructionsMatch } from "./types.js";
+import type {
+  IndexOccurrence,
+  IndexHashEntry,
+  IndexShard,
+  InstructionShard,
+} from "../index/types.js";
+import {
+  generateVariantCandidates,
+  instructionSketch,
+  scoreVariantCandidates,
+} from "../variant/index.js";
+import type { ScoredCandidate } from "../variant/index.js";
+import type {
+  TraceReport,
+  SameInstructionsMatch,
+  VariantCandidate,
+} from "./types.js";
 
 /**
  * Trace a local skill against a dual (exact + instructions) index.
@@ -17,7 +36,8 @@ import type { TraceReport, SameInstructionsMatch } from "./types.js";
  * Precedence:
  *   1. exact raw Git blob match
  *   2. same normalized instructions
- *   3. none
+ *   3. approximate variant candidates
+ *   4. none
  *
  * Does NOT depend on CLI code.
  */
@@ -82,7 +102,35 @@ export async function traceSkill(
     };
   }
 
-  // Step 3: No match
+  // Step 3: Approximate variant candidates.
+  const rawSkill = await readFile(path.join(path.resolve(skillPath), "SKILL.md"), "utf-8");
+  const localSketch = instructionSketch(normalizeInstructions(rawSkill));
+  const generated = await generateVariantCandidates(
+    localSketch,
+    (prefix) => readAnchorShard(indexDir, prefix),
+  );
+  const scored = await scoreVariantCandidates(
+    localSketch,
+    generated.candidates,
+    (prefix) => readSketchShard(indexDir, prefix),
+  );
+  if (scored.length > 0) {
+    const candidates = await enrichVariantCandidates(indexDir, scored);
+    return {
+      schemaVersion: "0.1",
+      query,
+      match: {
+        type: "variant_candidates",
+        method: "bottom-k-token-shingles-v1",
+        approximate: true,
+        candidateGenerationTruncated: generated.truncated,
+        candidates,
+      },
+      origin: { status: "not_inferred" },
+    };
+  }
+
+  // Step 4: No match
   return {
     schemaVersion: "0.1",
     query,
@@ -93,6 +141,73 @@ export async function traceSkill(
     },
     origin: { status: "not_inferred" },
   };
+}
+
+async function enrichVariantCandidates(
+  indexDir: string,
+  scored: readonly ScoredCandidate[],
+): Promise<VariantCandidate[]> {
+  const instructionCache = new Map<string, InstructionShard>();
+  const exactCache = new Map<string, IndexShard>();
+  const result: VariantCandidate[] = [];
+
+  for (const candidate of scored) {
+    const instructionPrefix = shardPrefix(candidate.instructionsSha256);
+    let instructionShard = instructionCache.get(instructionPrefix);
+    if (!instructionShard) {
+      instructionShard = await readInstructionShard(indexDir, instructionPrefix);
+      instructionCache.set(instructionPrefix, instructionShard);
+    }
+    const blobHashes = [
+      ...new Set(instructionShard[candidate.instructionsSha256] ?? []),
+    ].sort();
+    const occurrences = new Map<string, IndexOccurrence>();
+
+    for (const blobHash of blobHashes) {
+      const exactPrefix = shardPrefix(blobHash);
+      let exactShard = exactCache.get(exactPrefix);
+      if (!exactShard) {
+        exactShard = await readShard(indexDir, exactPrefix);
+        exactCache.set(exactPrefix, exactShard);
+      }
+      if (!Object.prototype.hasOwnProperty.call(exactShard, blobHash)) continue;
+      for (const occurrence of exactShard[blobHash].occurrences) {
+        const key = `${occurrence.repoFullName}\0${occurrence.path}`;
+        if (!occurrences.has(key)) occurrences.set(key, occurrence);
+      }
+    }
+
+    const orderedOccurrences = [...occurrences.values()].sort(compareExamples);
+    result.push({
+      instructionsSha256: `sha256:${candidate.instructionsSha256}`,
+      estimatedSimilarity: Number(candidate.estimatedSimilarity.toFixed(4)),
+      sharedAnchors: candidate.sharedAnchors,
+      rawVariantCount: blobHashes.length,
+      copyCount: orderedOccurrences.length,
+      examples: orderedOccurrences.slice(0, 3).map((occurrence) => ({
+        repoFullName: occurrence.repoFullName,
+        path: occurrence.path,
+        stars: occurrence.stars,
+      })),
+    });
+  }
+  return result;
+}
+
+function compareExamples(a: IndexOccurrence, b: IndexOccurrence): number {
+  if (a.stars === null && b.stars !== null) return 1;
+  if (a.stars !== null && b.stars === null) return -1;
+  if (a.stars !== null && b.stars !== null && a.stars !== b.stars) {
+    return b.stars - a.stars;
+  }
+  return (
+    compareStrings(a.repoFullName, b.repoFullName) ||
+    compareStrings(a.path, b.path)
+  );
+}
+
+function compareStrings(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /**

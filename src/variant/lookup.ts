@@ -50,7 +50,7 @@ export async function generateVariantCandidates(
     .sort(
       (a, b) =>
         b.sharedAnchors - a.sharedAnchors ||
-        a.variantId.localeCompare(b.variantId),
+        compareStrings(a.variantId, b.variantId),
     );
 
   return {
@@ -76,8 +76,8 @@ export async function scoreVariantCandidates(
   for (const [prefix, groupedCandidates] of byPrefix) {
     const shard = await readSketchShard(prefix);
     for (const candidate of groupedCandidates) {
+      if (!Object.prototype.hasOwnProperty.call(shard, candidate.variantId)) continue;
       const record = shard[candidate.variantId];
-      if (!record) continue;
       const estimatedSimilarity = estimateSketchSimilarity(
         localSketch,
         record.sketch,
@@ -97,7 +97,11 @@ export async function scoreVariantCandidates(
       (a, b) =>
         b.estimatedSimilarity - a.estimatedSimilarity ||
         b.sharedAnchors - a.sharedAnchors ||
-        a.instructionsSha256.localeCompare(b.instructionsSha256),
+        compareStrings(a.instructionsSha256, b.instructionsSha256),
     )
     .slice(0, MAX_FINAL_CANDIDATES);
+}
+
+function compareStrings(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }

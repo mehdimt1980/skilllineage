@@ -27,6 +27,8 @@ export {
   lookupExact,
   readInstructionShard,
   lookupInstructions,
+  readAnchorShard,
+  readSketchShard,
   shardPrefix,
   IndexError,
 } from "./index/index.js";
@@ -40,7 +42,17 @@ export type {
   IndexHashEntry,
   IndexShard,
   InstructionShard,
+  VariantIndexDescriptor,
+  SketchShard,
+  AnchorShard,
+  VariantSketchRecord,
 } from "./index/index.js";
+export {
+  estimateSketchSimilarity,
+  instructionSketch,
+  shingleHash96,
+  variantIdFromInstructionsSha256,
+} from "./variant/index.js";
 export { traceSkill, TraceError } from "./trace/index.js";
 export type {
   TraceReport,
@@ -48,5 +60,8 @@ export type {
   TraceMatch,
   ExactMatch,
   SameInstructionsMatch,
+  VariantCandidatesMatch,
+  VariantCandidate,
+  VariantCandidateExample,
   NoneMatch,
 } from "./trace/index.js";
