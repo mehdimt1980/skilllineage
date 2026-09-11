@@ -1,0 +1,43 @@
+{
+  "name": "skilllineage",
+  "version": "0.1.0",
+  "description": "Identify the origin, duplicates, forks, and mutations of AI Agent Skills. Deterministic fingerprinting for SKILL.md lineage tracking.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "skilllineage": "./dist/cli/main.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.0"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "skill",
+    "lineage",
+    "fingerprint",
+    "provenance",
+    "cli"
+  ]
+}

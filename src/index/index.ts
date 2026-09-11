@@ -1,0 +1,26 @@
+export {
+  readManifest,
+  readShard,
+  lookupExact,
+  readInstructionShard,
+  lookupInstructions,
+  readSketchShard,
+  readAnchorShard,
+  shardPrefix,
+  IndexError,
+} from "./reader.js";
+export type {
+  IndexManifest,
+  IndexSource,
+  IndexDescriptors,
+  IndexDescriptor,
+  InstructionIndexStats,
+  IndexOccurrence,
+  IndexHashEntry,
+  IndexShard,
+  InstructionShard,
+  VariantIndexDescriptor,
+  VariantSketchRecord,
+  SketchShard,
+  AnchorShard,
+} from "./types.js";
