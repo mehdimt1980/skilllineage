@@ -2,6 +2,8 @@
 
 **Trace the copies, variants, and lineage evidence of AI Agent Skills.**
 
+**English** | [Deutsch](README.de.md)
+
 SkillLineage is an experimental open-source CLI for identifying how `SKILL.md` files relate to one another across the growing Agent Skills ecosystem.
 
 It uses deterministic fingerprints and normalized instruction matching to answer questions such as:
