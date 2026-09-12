@@ -6,6 +6,7 @@ export {
   estimateSketchSimilarity,
   instructionSketch,
   shingleHash96,
+  anchorShardPrefix,
   variantIdFromInstructionsSha256,
 } from "./sketch.js";
 export {

@@ -173,10 +173,13 @@ python tools/benchmark-gitskills.py \
   --index /pfad/zum/skilllineage-index \
   --samples 100 \
   --seed 42 \
-  --output benchmark-report.json
+  --output benchmark-report.json \
+  --details-output benchmark-details.json
 ```
 
 Die Harness zieht deterministische Stichproben realer Skills und misst Indexgröße, In-Process-Trace-Latenz, Exact- und Same-Instructions-Trefferraten sowie Recall@1/3/10 für kontrollierte leichte und mittlere Mutationen. Sie verändert oder lädt den Quelldatensatz nicht herunter und läuft nicht in der CI. `--keep-temp` dient ausschließlich der gezielten Untersuchung erzeugter Fixtures.
+
+Die Variantensuche ist approximativ. Der Benchmark meldet den exakten Jaccard-Wert normalisierter 5-Token-Shingles getrennt von der Sketch-Schätzung, einschließlich Recall für Mutationen mit einem exakten Wert von mindestens 0,70. Aggregierte Diagnosen zeigen Verluste bei Kandidatengenerierung und Filterung; `--details-output` schreibt bei Bedarf Einzeldiagnosen ohne Skill-Quelltext. Ältere Indizes müssen wegen der geänderten Anchor-Shard-Zuordnung im Indexschema 0.2 mit dem aktuellen Builder neu erstellt werden.
 
 ## GitSkills-Hinweis
 

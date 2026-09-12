@@ -17,7 +17,7 @@ import type {
   SketchShard,
   AnchorShard,
 } from "../index/types.js";
-import { instructionSketch, variantIdFromInstructionsSha256 } from "../variant/index.js";
+import { anchorShardPrefix, instructionSketch, variantIdFromInstructionsSha256 } from "../variant/index.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -45,7 +45,7 @@ async function makeTempSkill(
 
 function validManifest(): IndexManifest {
   return {
-    schemaVersion: "0.1",
+    schemaVersion: "0.2",
     kind: "skilllineage-exact-index",
     source: {
       name: "TestSkills",
@@ -73,6 +73,7 @@ function validManifest(): IndexManifest {
       sketchSize: 32,
       anchorCount: 8,
       maxAnchorPostings: 2000,
+      anchorShardRouting: "sha256-anchor-hex-v1",
       skippedHotAnchorCount: 0,
     },
   };
@@ -517,7 +518,7 @@ describe("variant_candidates match", () => {
 
     const anchorShards: Record<string, AnchorShard> = {};
     for (const anchor of sharedAnchors) {
-      const prefix = anchor.slice(0, 2);
+      const prefix = anchorShardPrefix(anchor);
       anchorShards[prefix] ??= {};
       anchorShards[prefix][anchor] = [variantId];
     }

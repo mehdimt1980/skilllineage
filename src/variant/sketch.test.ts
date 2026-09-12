@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 
 import { normalizeInstructions } from "../fingerprint/index.js";
 import {
   estimateSketchSimilarity,
   instructionSketch,
   shingleHash96,
+  anchorShardPrefix,
   variantIdFromInstructionsSha256,
 } from "./sketch.js";
 
@@ -56,6 +58,20 @@ describe("instructionSketch", () => {
       "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen changed\n",
     ));
     expect(a.slice(0, 8).filter((hash) => b.includes(hash)).length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("anchorShardPrefix", () => {
+  it("is deterministic and hashes anchor hex instead of taking its prefix", () => {
+    const anchor = "19a4dd78f21b72c5191c388a";
+    expect(anchorShardPrefix(anchor)).toBe(anchorShardPrefix(anchor));
+    expect(anchorShardPrefix(anchor)).toMatch(/^[0-9a-f]{2}$/);
+    expect(anchorShardPrefix(anchor)).toBe(createHash("sha256").update(anchor, "utf-8").digest("hex").slice(0, 2));
+  });
+  it("distributes distinct anchor values without modifying them", () => {
+    const anchors = Array.from({ length: 32 }, (_, index) => index.toString(16).padStart(24, "0"));
+    expect(new Set(anchors.map(anchorShardPrefix)).size).toBeGreaterThan(1);
+    expect(anchors[0]).toBe("000000000000000000000000");
   });
 });
 

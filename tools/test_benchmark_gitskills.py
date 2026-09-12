@@ -1,4 +1,6 @@
 import json
+import gzip
+import hashlib
 import shutil
 import sqlite3
 import tempfile
@@ -148,24 +150,94 @@ class BenchmarkToolingTests(unittest.TestCase):
         for relative in ("exact", "instructions", "variants/sketches", "variants/anchors"):
             (index / relative).mkdir(parents=True, exist_ok=True)
         (index / "manifest.json").write_bytes(b"12345")
-        (index / "exact" / "00.json.gz").write_bytes(b"1" * 7)
-        (index / "instructions" / "00.json.gz").write_bytes(b"2" * 11)
-        (index / "variants" / "sketches" / "00.json.gz").write_bytes(b"3" * 13)
-        (index / "variants" / "anchors" / "00.json.gz").write_bytes(b"4" * 17)
+        for category in ("exact", "instructions", "variants/sketches", "variants/anchors"):
+            (index / category / "00.json.gz").write_bytes(gzip.compress(b'{"key":[]}', mtime=0))
         return index
 
     def test_index_size_category_accounting(self):
         metrics = benchmark.index_size_metrics(self.make_index())
         self.assertEqual(metrics["manifestBytes"], 5)
         self.assertEqual(metrics["categories"]["manifest"]["fileCount"], 1)
-        self.assertEqual(metrics["categories"]["exact"]["bytes"], 7)
-        self.assertEqual(metrics["categories"]["variantAnchors"]["bytes"], 17)
-        self.assertEqual(metrics["totalBytes"], 53)
+        self.assertEqual(metrics["categories"]["exact"]["fileCount"], 1)
+        self.assertEqual(metrics["categories"]["variantAnchors"]["nonEmptyFileCount"], 1)
+        self.assertEqual(metrics["totalBytes"], 5 + sum(
+            item["bytes"] for name, item in metrics["categories"].items() if name != "manifest"))
 
     def test_largest_shard_accounting(self):
         index = self.make_index()
-        (index / "exact" / "01.json.gz").write_bytes(b"x" * 19)
-        self.assertEqual(benchmark.index_size_metrics(index)["categories"]["exact"]["largestShardBytes"], 19)
+        larger = gzip.compress(b'{"key":["longer-value"]}', mtime=0)
+        (index / "exact" / "01.json.gz").write_bytes(larger)
+        self.assertEqual(benchmark.index_size_metrics(index)["categories"]["exact"]["largestShardBytes"], len(larger))
+
+    def test_anchor_routing_is_deterministic_and_distributed(self):
+        anchors = [f"{value:024x}" for value in range(32)]
+        prefixes = [benchmark._builder.anchor_shard_prefix(anchor) for anchor in anchors]
+        self.assertEqual(prefixes[0], hashlib.sha256(anchors[0].encode()).hexdigest()[:2])
+        self.assertEqual(prefixes, [benchmark._builder.anchor_shard_prefix(anchor) for anchor in anchors])
+        self.assertGreater(len(set(prefixes)), 1)
+
+    def test_exact_ground_truth_jaccard(self):
+        content = "one two three four five six seven\n"
+        self.assertEqual(benchmark.exact_ground_truth_jaccard(content, content), 1)
+        self.assertEqual(benchmark.exact_ground_truth_jaccard(content, "orbital marine crystal\n"), 0)
+        self.assertEqual(benchmark.exact_ground_truth_jaccard("a b c d e f\n", "a b c d e x\n"), 1 / 3)
+
+    def test_ground_truth_eligibility_and_recall(self):
+        def result(similarity, rank):
+            candidate = {"instructionsSha256": "sha256:target"}
+            return {"groundTruthJaccard": similarity, "expectedInstructionsSha256": "sha256:target",
+                    "match": {"type": "variant_candidates", "candidates": [candidate] if rank else []},
+                    "diagnostic": self.diagnostic(finalRank=rank)}
+        quality = benchmark.variant_quality([result(0.8, 1), result(0.9, None), result(0.4, 1)])
+        self.assertEqual(quality["groundTruthAtLeast070"]["count"], 2)
+        self.assertEqual(quality["groundTruthAtLeast070"]["recallAt1"], 0.5)
+
+    def test_successful_rank_buckets(self):
+        items = []
+        for rank in (1, 2, 4, None):
+            candidates = [{"instructionsSha256": "sha256:wrong"}] * ((rank or 1) - 1)
+            if rank is not None:
+                candidates.append({"instructionsSha256": "sha256:target"})
+            items.append({"groundTruthJaccard": 0.9, "expectedInstructionsSha256": "sha256:target",
+                          "match": {"type": "variant_candidates", "candidates": candidates},
+                          "diagnostic": self.diagnostic(finalRank=rank)})
+        ranks = benchmark.variant_quality(items)["successfulExpectedRanks"]
+        self.assertEqual(ranks, {"rank1Count": 1, "rank2to3Count": 1,
+                                 "rank4to10Count": 1, "missingCount": 1})
+
+    @staticmethod
+    def diagnostic(**overrides):
+        return {"finalRank": None, "expectedSharedAnchorPostings": 2,
+                "preScoreEligible": True, "candidateGenerationTruncated": False,
+                "passesEstimatedSimilarityThreshold": True,
+                "estimatedSketchSimilarity": 0.8, **overrides}
+
+    def test_miss_reason_precedence(self):
+        self.assertEqual(benchmark.miss_reason(self.diagnostic(expectedSharedAnchorPostings=1)), "insufficient_shared_anchors")
+        self.assertEqual(benchmark.miss_reason(self.diagnostic(preScoreEligible=False,
+            candidateGenerationTruncated=True)), "pre_score_truncated")
+        self.assertEqual(benchmark.miss_reason(self.diagnostic(passesEstimatedSimilarityThreshold=False)),
+            "below_estimated_similarity")
+        self.assertEqual(benchmark.miss_reason(self.diagnostic()), "outside_final_top10")
+        self.assertIsNone(benchmark.miss_reason(self.diagnostic(finalRank=1)))
+
+    def test_shard_balance_excludes_logical_empty(self):
+        index = self.make_index()
+        (index / "exact" / "01.json.gz").write_bytes(gzip.compress(b"{}", mtime=0))
+        metrics = benchmark.index_size_metrics(index)["categories"]["exact"]
+        self.assertEqual(metrics["fileCount"], 2)
+        self.assertEqual(metrics["nonEmptyFileCount"], 1)
+        self.assertEqual(metrics["largestToMeanRatio"], 1)
+
+    def test_details_excludes_source_content(self):
+        identifiers = [{"fileSha": "a" * 40, "repoFullName": "owner/repo", "path": "SKILL.md",
+                        "content": "PRIVATE-SKILL-CONTENT"}]
+        result = {"id": "0:variant_light", "category": "variant_light",
+                  "expectedInstructionsSha256": "sha256:target", "groundTruthJaccard": 0.8,
+                  "diagnostic": self.diagnostic(finalRank=1), "match": {"type": "variant_candidates"}}
+        details = benchmark.details_report([result], identifiers)
+        self.assertNotIn("PRIVATE-SKILL-CONTENT", json.dumps(details))
+        self.assertEqual(details["queries"][0]["finalRank"], 1)
 
     def test_benchmark_json_serialization(self):
         output = self.root / "nested" / "report.json"

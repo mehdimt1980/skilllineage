@@ -4,20 +4,24 @@ import {
   generateVariantCandidates,
   scoreVariantCandidates,
 } from "./lookup.js";
+import { anchorShardPrefix } from "./sketch.js";
 import type { AnchorShard, SketchShard } from "../index/types.js";
 
 describe("variant candidate generation", () => {
   it("reads each anchor shard once and counts shared anchors", async () => {
     const local = ["aa00", "aa01", "bb00"];
     const reads = new Map<string, number>();
+    const shards: Record<string, AnchorShard> = {};
+    for (const [anchor, postings] of Object.entries({ aa00: ["v1", "v2"], aa01: ["v1"], bb00: ["v1", "v2"] })) {
+      const prefix = anchorShardPrefix(anchor);
+      (shards[prefix] ??= {})[anchor] = postings;
+    }
     const result = await generateVariantCandidates(local, (prefix) => {
       reads.set(prefix, (reads.get(prefix) ?? 0) + 1);
-      const shard: AnchorShard = prefix === "aa"
-        ? { aa00: ["v1", "v2"], aa01: ["v1"] }
-        : { bb00: ["v1", "v2"] };
-      return Promise.resolve(shard);
+      return Promise.resolve(shards[prefix] ?? {});
     });
-    expect(reads).toEqual(new Map([["aa", 1], ["bb", 1]]));
+    expect([...reads.values()].every((count) => count === 1)).toBe(true);
+    expect([...reads.keys()].sort()).toEqual([...new Set(local.map(anchorShardPrefix))].sort());
     expect(result.candidates).toEqual([
       { variantId: "v1", sharedAnchors: 3 },
       { variantId: "v2", sharedAnchors: 2 },
@@ -36,7 +40,8 @@ describe("variant candidate generation", () => {
       i.toString(16).padStart(24, "0"),
     );
     const result = await generateVariantCandidates(["aa00", "bb00"], (prefix) =>
-      Promise.resolve(prefix === "aa" ? { aa00: postings } : { bb00: postings }),
+      Promise.resolve({ ...(prefix === anchorShardPrefix("aa00") ? { aa00: postings } : {}),
+        ...(prefix === anchorShardPrefix("bb00") ? { bb00: postings } : {}) }),
     );
     expect(result.candidates).toHaveLength(2000);
     expect(result.truncated).toBe(true);

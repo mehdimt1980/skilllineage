@@ -5,7 +5,7 @@
  */
 
 export interface IndexManifest {
-  readonly schemaVersion: "0.1";
+  readonly schemaVersion: "0.2";
   readonly kind: "skilllineage-exact-index";
   readonly source: IndexSource;
   readonly indexes: IndexDescriptors;
@@ -44,6 +44,7 @@ export interface VariantIndexDescriptor {
   readonly sketchSize: 32;
   readonly anchorCount: 8;
   readonly maxAnchorPostings: 2000;
+  readonly anchorShardRouting: "sha256-anchor-hex-v1";
   readonly skippedHotAnchorCount: number;
 }
 

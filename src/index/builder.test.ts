@@ -8,9 +8,11 @@ import { promisify } from "node:util";
 import path from "node:path";
 
 import { normalizeInstructions } from "../fingerprint/index.js";
+import { instructionSimilarity } from "../compare/index.js";
 import {
   instructionSketch,
   shingleHash96,
+  anchorShardPrefix,
   variantIdFromInstructionsSha256,
 } from "../variant/index.js";
 
@@ -727,11 +729,55 @@ describe("variant index", () => {
     await runBuilder(dbPath, outDir);
     const anchor = shingleHash96("common one two three four");
     const shard = readGzipShard(await readFile(path.join(
-      outDir, "variants", "anchors", `${anchor.slice(0, 2)}.json.gz`,
+      outDir, "variants", "anchors", `${anchorShardPrefix(anchor)}.json.gz`,
     )));
     expect(shard).not.toHaveProperty(anchor);
     const manifest = JSON.parse(await readFile(path.join(outDir, "manifest.json"), "utf-8")) as { variantIndex: { skippedHotAnchorCount: number } };
     expect(manifest.variantIndex.skippedHotAnchorCount).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Routed anchor format and Python/TypeScript parity
+// ---------------------------------------------------------------------------
+
+describe("routed anchor shards", () => {
+  it("writes unchanged anchors to the SHA-256-routed shard", async () => {
+    const tmpDir = await makeTempDir();
+    const dbPath = path.join(tmpDir, "test.db");
+    const outDir = path.join(tmpDir, "index");
+    const content = "one two three four five six seven eight nine ten eleven twelve\n";
+    await createTestDb(dbPath, {
+      repos: [{ full_name: "routing/repo", stars: 1 }],
+      artifacts: [{ file_sha: "ab" + "0".repeat(38), repo_full_name: "routing/repo", path: "SKILL.md", content }],
+    });
+    await runBuilder(dbPath, outDir);
+    const anchors = instructionSketch(normalizeInstructions(content)).slice(0, 8);
+    const expectedId = variantIdFromInstructionsSha256(instrSha256(content));
+    for (const anchor of anchors) {
+      const prefix = anchorShardPrefix(anchor);
+      const shard = readGzipShard(await readFile(path.join(outDir, "variants", "anchors", `${prefix}.json.gz`)));
+      expect(shard[anchor]).toContain(expectedId);
+    }
+    const manifest = JSON.parse(await readFile(path.join(outDir, "manifest.json"), "utf-8")) as {
+      schemaVersion: string; variantIndex: { anchorShardRouting: string };
+    };
+    expect(manifest.schemaVersion).toBe("0.2");
+    expect(manifest.variantIndex.anchorShardRouting).toBe("sha256-anchor-hex-v1");
+  });
+
+  it("matches Python exact Jaccard on multiple normalized cases", async () => {
+    const pairs = [
+      ["a b c d e f\n", "a b c d e x\n"],
+      ["same instructions\n", "same instructions\n"],
+      ["orbital marine crystal\n", "database migration schema\n"],
+    ];
+    for (const [first, second] of pairs) {
+      const script = "import sys; from tools.benchmark_gitskills import exact_ground_truth_jaccard; print(exact_ground_truth_jaccard(sys.argv[1], sys.argv[2]))";
+      const { stdout } = await execFileAsync("python", ["-c", script, first, second]);
+      expect(Number(stdout.trim())).toBe(instructionSimilarity(
+        normalizeInstructions(first), normalizeInstructions(second)));
+    }
   });
 });
 

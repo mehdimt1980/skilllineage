@@ -7,6 +7,11 @@ export const SHINGLE_HASH_HEX_LENGTH = 24;
 export const DEFAULT_SKETCH_SIZE = 32;
 export const DEFAULT_ANCHOR_COUNT = 8;
 
+/** Physical anchor-posting shard routing; does not alter the anchor fingerprint. */
+export function anchorShardPrefix(anchor: string): string {
+  return createHash("sha256").update(Buffer.from(anchor, "utf-8")).digest("hex").slice(0, 2);
+}
+
 export function shingleHash96(shingle: string): string {
   return createHash("sha256")
     .update(Buffer.from(shingle, "utf-8"))

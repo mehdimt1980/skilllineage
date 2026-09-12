@@ -60,9 +60,9 @@ export async function readManifest(indexDir: string): Promise<IndexManifest> {
     );
   }
 
-  if (m.schemaVersion !== "0.1") {
+  if (m.schemaVersion !== "0.2") {
     throw new IndexError(
-      `Unsupported schema version: ${String(m.schemaVersion)}`,
+      `Unsupported schema version: ${String(m.schemaVersion)}. Rebuild the index with the current builder.`,
     );
   }
 
@@ -88,7 +88,7 @@ export async function readManifest(indexDir: string): Promise<IndexManifest> {
   }
 
   if (!isCompatibleVariantIndex(m.variantIndex)) {
-    throw new IndexError(`Unsupported variant index parameters: ${manifestPath}`);
+    throw new IndexError(`Unsupported variant index parameters or anchor shard routing: ${manifestPath}. Rebuild the index with the current builder.`);
   }
 
   return manifest as IndexManifest;
@@ -104,6 +104,7 @@ function isCompatibleVariantIndex(value: unknown): boolean {
     v.sketchSize === 32 &&
     v.anchorCount === 8 &&
     v.maxAnchorPostings === 2000 &&
+    v.anchorShardRouting === "sha256-anchor-hex-v1" &&
     typeof v.skippedHotAnchorCount === "number"
   );
 }

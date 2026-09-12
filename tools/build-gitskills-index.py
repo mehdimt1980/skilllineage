@@ -20,7 +20,7 @@ import tempfile
 from pathlib import Path
 
 
-SCHEMA_VERSION = "0.1"
+SCHEMA_VERSION = "0.2"
 KIND = "skilllineage-exact-index"
 SHARD_PREFIX_LENGTH = 2
 SHINGLE_SIZE = 5
@@ -28,6 +28,12 @@ SHINGLE_HASH_HEX_LENGTH = 24
 SKETCH_SIZE = 32
 ANCHOR_COUNT = 8
 MAX_ANCHOR_POSTINGS = 2000
+ANCHOR_SHARD_ROUTING = "sha256-anchor-hex-v1"
+
+
+def anchor_shard_prefix(anchor: str) -> str:
+    """SHA-256 of the unchanged lowercase anchor hex, truncated to one byte."""
+    return hashlib.sha256(anchor.encode("utf-8")).hexdigest()[:SHARD_PREFIX_LENGTH]
 
 # All 256 possible 2-hex prefixes in sorted order
 ALL_PREFIXES = [f"{i:02x}" for i in range(256)]
@@ -253,6 +259,7 @@ def main():
             "sketchSize": SKETCH_SIZE,
             "anchorCount": ANCHOR_COUNT,
             "maxAnchorPostings": MAX_ANCHOR_POSTINGS,
+            "anchorShardRouting": ANCHOR_SHARD_ROUTING,
             "skippedHotAnchorCount": skipped_hot_anchor_count,
         },
     }
@@ -446,9 +453,10 @@ def _populate_instruction_index(
     """)
     tmp_conn.execute("""
         CREATE TABLE variant_anchors (
+            route_prefix TEXT NOT NULL,
             anchor_hash TEXT NOT NULL,
             variant_id TEXT NOT NULL,
-            PRIMARY KEY (anchor_hash, variant_id)
+            PRIMARY KEY (route_prefix, anchor_hash, variant_id)
         ) WITHOUT ROWID
     """)
 
@@ -511,8 +519,8 @@ def _populate_instruction_index(
                 )
         else:
             tmp_conn.executemany(
-                "INSERT INTO variant_anchors (anchor_hash, variant_id) VALUES (?, ?)",
-                [(anchor, variant_id) for anchor in sketch[:ANCHOR_COUNT]],
+                "INSERT INTO variant_anchors (route_prefix, anchor_hash, variant_id) VALUES (?, ?, ?)",
+                [(anchor_shard_prefix(anchor), anchor, variant_id) for anchor in sketch[:ANCHOR_COUNT]],
             )
 
         if len(batch) >= BATCH_SIZE:
@@ -611,18 +619,17 @@ def _write_variant_anchors(tmp_conn, anchors_dir: Path) -> int:
         (MAX_ANCHOR_POSTINGS,),
     ).fetchone()[0]
     rows = tmp_conn.execute("""
-        SELECT va.anchor_hash, va.variant_id
+        SELECT va.route_prefix, va.anchor_hash, va.variant_id
         FROM variant_anchors va
         JOIN (
             SELECT anchor_hash FROM variant_anchors
             GROUP BY anchor_hash HAVING COUNT(*) <= ?
         ) kept ON kept.anchor_hash = va.anchor_hash
-        ORDER BY va.anchor_hash, va.variant_id
+        ORDER BY va.route_prefix, va.anchor_hash, va.variant_id
     """, (MAX_ANCHOR_POSTINGS,))
     current_prefix = None
     current_shard = {}
-    for anchor_hash, variant_id in rows:
-        prefix = anchor_hash[:SHARD_PREFIX_LENGTH]
+    for prefix, anchor_hash, variant_id in rows:
         if current_prefix is not None and prefix != current_prefix:
             write_gz_shard(anchors_dir / f"{current_prefix}.json.gz", current_shard)
             current_shard = {}

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import gzip
 import hashlib
 import importlib.util
 import json
@@ -59,6 +60,22 @@ SAMPLING_SQL = """
 
 def normalized_instruction_sha256(content: str) -> str:
     return _builder.instruction_sha256(content)
+
+
+def exact_ground_truth_jaccard(original: str, mutated: str) -> float:
+    """Mirror TypeScript's normalized, exact 5-token shingle-set Jaccard."""
+    def shingles(content):
+        tokens = _builder.tokenize_instructions(_builder.normalize_instructions(content))
+        if not tokens:
+            return set()
+        if len(tokens) < 5:
+            return {" ".join(tokens)}
+        return {" ".join(tokens[i:i + 5]) for i in range(len(tokens) - 4)}
+
+    first, second = shingles(original), shingles(mutated)
+    if not first and not second:
+        return 1.0
+    return len(first & second) / len(first | second)
 
 
 def sample_representatives(db_path: Path, sample_count: int, seed: int):
@@ -153,6 +170,8 @@ def create_benchmark_cases(samples, workspace: Path, seed: int):
                 "category": category,
                 "skillPath": str(case_dir),
                 "expectedInstructionsSha256": expected,
+                **({"groundTruthJaccard": exact_ground_truth_jaccard(sample["content"], content)}
+                   if category.startswith("variant_") else {}),
             })
     return queries, identifiers
 
@@ -203,11 +222,93 @@ def match_type_counts(results):
 def category_size(path: Path):
     files = [item for item in path.rglob("*") if item.is_file()] if path.is_dir() else []
     sizes = [item.stat().st_size for item in files]
+    shard_sizes = []
+    for item, size in zip(files, sizes):
+        if item.suffix == ".gz":
+            with gzip.open(item, "rt", encoding="utf-8") as handle:
+                if not json.load(handle):
+                    continue
+        shard_sizes.append(size)
+    mean_size = statistics.fmean(shard_sizes) if shard_sizes else None
     return {
         "bytes": sum(sizes),
         "fileCount": len(files),
+        "nonEmptyFileCount": len(shard_sizes),
+        "smallestNonEmptyShardBytes": min(shard_sizes, default=None),
+        "meanShardBytes": mean_size,
+        "p50ShardBytes": percentile(shard_sizes, 0.50) if shard_sizes else None,
+        "p95ShardBytes": percentile(shard_sizes, 0.95) if shard_sizes else None,
         "largestShardBytes": max(sizes, default=0),
+        "largestToMeanRatio": max(shard_sizes) / mean_size if mean_size else None,
     }
+
+
+def similarity_summary(values):
+    if not values:
+        return {"count": 0, "min": None, "mean": None, "p50": None, "p95": None, "max": None}
+    return {
+        "count": len(values), "min": min(values), "mean": statistics.fmean(values),
+        "p50": percentile(values, 0.50), "p95": percentile(values, 0.95), "max": max(values),
+    }
+
+
+def miss_reason(diagnostic):
+    if diagnostic["finalRank"] is not None:
+        return None
+    if diagnostic["expectedSharedAnchorPostings"] < 2:
+        return "insufficient_shared_anchors"
+    if not diagnostic["preScoreEligible"]:
+        return "pre_score_truncated" if diagnostic["candidateGenerationTruncated"] else "unexpected_missing"
+    if not diagnostic["passesEstimatedSimilarityThreshold"]:
+        return "below_estimated_similarity"
+    if diagnostic["estimatedSketchSimilarity"] is not None:
+        return "outside_final_top10"
+    return "unexpected_missing"
+
+
+def variant_quality(results):
+    eligible = [item for item in results if item["groundTruthJaccard"] >= 0.70]
+    def recalls(items):
+        return {"count": len(items), **{f"recallAt{rank}": recall_at(items, rank) for rank in (1, 3, 10)}}
+    reasons = {}
+    ranks = {"rank1Count": 0, "rank2to3Count": 0, "rank4to10Count": 0, "missingCount": 0}
+    for item in results:
+        diagnostic = item["diagnostic"]
+        rank = diagnostic["finalRank"]
+        if rank is None:
+            ranks["missingCount"] += 1
+            reason = miss_reason(diagnostic)
+            reasons[reason] = reasons.get(reason, 0) + 1
+        elif rank == 1:
+            ranks["rank1Count"] += 1
+        elif rank <= 3:
+            ranks["rank2to3Count"] += 1
+        else:
+            ranks["rank4to10Count"] += 1
+    return {
+        **{f"recallAt{rank}": recall_at(results, rank) for rank in (1, 3, 10)},
+        "all": recalls(results), "groundTruthAtLeast070": recalls(eligible),
+        "groundTruthJaccard": similarity_summary([item["groundTruthJaccard"] for item in results]),
+        "missReasons": dict(sorted(reasons.items())), "successfulExpectedRanks": ranks,
+    }
+
+
+def details_report(results, identifiers):
+    sample_by_ordinal = {str(i): identifier for i, identifier in enumerate(identifiers)}
+    details = []
+    for item in results:
+        if not item["category"].startswith("variant_"):
+            continue
+        sample = sample_by_ordinal[item["id"].split(":", 1)[0]]
+        details.append({
+            "id": item["id"], "category": item["category"],
+            "fileSha": sample["fileSha"], "repoFullName": sample["repoFullName"],
+            "path": sample["path"],
+            "expectedInstructionsSha256": item["expectedInstructionsSha256"],
+            "groundTruthJaccard": item["groundTruthJaccard"],
+            **item["diagnostic"], "missReason": miss_reason(item["diagnostic"]),
+        })
+    return {"schemaVersion": "0.1", "queries": details}
 
 
 def index_size_metrics(index_dir: Path):
@@ -266,7 +367,8 @@ def run_trace_worker(node: str, payload_path: Path):
     return json.loads(completed.stdout)
 
 
-def build_report(db_path: Path, index_dir: Path, samples: int, seed: int, keep_temp: bool, node: str):
+def build_report(db_path: Path, index_dir: Path, samples: int, seed: int, keep_temp: bool, node: str,
+                 details_output: Path | None = None):
     validate_inputs(db_path, index_dir)
     chosen = sample_representatives(db_path, samples, seed)
     if not chosen:
@@ -280,6 +382,10 @@ def build_report(db_path: Path, index_dir: Path, samples: int, seed: int, keep_t
             encoding="utf-8",
         )
         worker = run_trace_worker(node, payload_path)
+        query_by_id = {query["id"]: query for query in queries}
+        for item in worker["results"]:
+            if item["category"].startswith("variant_"):
+                item["groundTruthJaccard"] = query_by_id[item["id"]]["groundTruthJaccard"]
         by_category = {
             name: [item for item in worker["results"] if item["category"] == name]
             for name in ("exact", "same_instructions", "variant_light", "variant_medium", "none")
@@ -312,16 +418,8 @@ def build_report(db_path: Path, index_dir: Path, samples: int, seed: int, keep_t
                     ),
                     "observedMatchTypeCounts": match_type_counts(by_category["none"]),
                 },
-                "variantLight": {
-                    "recallAt1": recall_at(by_category["variant_light"], 1),
-                    "recallAt3": recall_at(by_category["variant_light"], 3),
-                    "recallAt10": recall_at(by_category["variant_light"], 10),
-                },
-                "variantMedium": {
-                    "recallAt1": recall_at(by_category["variant_medium"], 1),
-                    "recallAt3": recall_at(by_category["variant_medium"], 3),
-                    "recallAt10": recall_at(by_category["variant_medium"], 10),
-                },
+                "variantLight": variant_quality(by_category["variant_light"]),
+                "variantMedium": variant_quality(by_category["variant_medium"]),
             },
             "latencyMs": {
                 "exact": latency_summary([item["durationMs"] for item in by_category["exact"]]),
@@ -333,6 +431,8 @@ def build_report(db_path: Path, index_dir: Path, samples: int, seed: int, keep_t
         }
         if keep_temp:
             report["temporaryWorkspace"] = str(workspace)
+        if details_output is not None:
+            write_report(details_report(worker["results"], identifiers), details_output)
         return report
 
 
@@ -351,6 +451,7 @@ def parse_args(argv=None):
     parser.add_argument("--samples", type=int, default=100)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--details-output", type=Path)
     parser.add_argument("--keep-temp", action="store_true")
     parser.add_argument("--node", default=os.environ.get("NODE", "node"))
     return parser.parse_args(argv)
@@ -360,7 +461,8 @@ def main(argv=None):
     args = parse_args(argv)
     try:
         report = build_report(
-            args.db, args.index, args.samples, args.seed, args.keep_temp, args.node
+            args.db, args.index, args.samples, args.seed, args.keep_temp, args.node,
+            args.details_output,
         )
         write_report(report, args.output)
     except (BenchmarkError, sqlite3.Error, OSError, json.JSONDecodeError) as error:

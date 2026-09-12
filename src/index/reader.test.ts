@@ -35,7 +35,7 @@ function validManifest(
   overrides: Partial<Record<string, unknown>> = {},
 ): IndexManifest {
   return {
-    schemaVersion: "0.1",
+    schemaVersion: "0.2",
     kind: "skilllineage-exact-index",
     source: {
       name: "TestSkills",
@@ -63,6 +63,7 @@ function validManifest(
       sketchSize: 32,
       anchorCount: 8,
       maxAnchorPostings: 2000,
+      anchorShardRouting: "sha256-anchor-hex-v1",
       skippedHotAnchorCount: 0,
     },
     ...overrides,
@@ -190,6 +191,17 @@ describe("readManifest", () => {
     await expect(readManifest(dir)).rejects.toThrow(
       "Unsupported variant index parameters",
     );
+  });
+
+  it("rejects old and missing anchor routing with a rebuild instruction", async () => {
+    const dir = await makeTempDir();
+    await writeManifest(dir, { ...validManifest(), schemaVersion: "0.1" });
+    await expect(readManifest(dir)).rejects.toThrow("Rebuild the index");
+    await writeManifest(dir, {
+      ...validManifest(),
+      variantIndex: { ...validManifest().variantIndex, anchorShardRouting: undefined },
+    });
+    await expect(readManifest(dir)).rejects.toThrow("Rebuild the index");
   });
 });
 

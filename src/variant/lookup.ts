@@ -1,4 +1,4 @@
-import { DEFAULT_ANCHOR_COUNT, estimateSketchSimilarity } from "./sketch.js";
+import { DEFAULT_ANCHOR_COUNT, anchorShardPrefix, estimateSketchSimilarity } from "./sketch.js";
 import type { AnchorShard, SketchShard } from "../index/types.js";
 
 export const MIN_SHARED_ANCHORS = 2;
@@ -28,7 +28,7 @@ export async function generateVariantCandidates(
   const anchors = localSketch.slice(0, DEFAULT_ANCHOR_COUNT);
   const byPrefix = new Map<string, string[]>();
   for (const anchor of anchors) {
-    const prefix = anchor.slice(0, 2);
+    const prefix = anchorShardPrefix(anchor);
     const group = byPrefix.get(prefix) ?? [];
     group.push(anchor);
     byPrefix.set(prefix, group);
