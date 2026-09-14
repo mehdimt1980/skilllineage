@@ -179,6 +179,8 @@ python tools/benchmark-gitskills.py \
 
 The harness deterministically samples real Skills and measures index size, in-process trace latency, exact and same-instruction hit rates, and Recall@1/3/10 for controlled light and medium mutations. It does not modify or download the source dataset, and it is not run by CI. Use `--keep-temp` only when fixture inspection is needed.
 
+Benchmark schema 0.2 also profiles the real retrieval pipeline: shard I/O, compressed and decompressed bytes, stage timings, candidate progression, hot-anchor omission evidence, and deterministic slow-query summaries. This diagnostic profiling does not alter trace semantics or require an index rebuild. Timings depend strongly on storage, OS, and cache state; benchmark output never includes Skill source text.
+
 Variant retrieval is approximate. The benchmark reports exact normalized 5-token-shingle Jaccard similarity separately from sketch-estimated similarity, including recall for mutations with exact similarity at least 0.70. Aggregate diagnostics identify candidate-generation and filtering misses; optional `--details-output` records per-query diagnostics without Skill source text. Rebuild older indexes with the current builder before tracing or benchmarking because anchor shard routing changed in index schema 0.2.
 
 ## GitSkills attribution

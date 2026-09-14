@@ -9,4 +9,6 @@ export type {
   VariantCandidate,
   VariantCandidateExample,
   NoneMatch,
+  TraceProfiling,
+  TraceProfilingOptions,
 } from "./types.js";

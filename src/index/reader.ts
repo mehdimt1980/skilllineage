@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 
 import type {
   IndexManifest,
@@ -21,6 +22,10 @@ export class IndexError extends Error {
     this.name = "IndexError";
   }
 }
+
+export type ShardKind = "exact" | "instructions" | "variant_anchor" | "variant_sketch";
+export interface ShardReadEvent { shardKind: ShardKind; prefix: string; compressedBytes: number; decompressedBytes: number; readMs: number; gunzipMs: number; parseMs: number; totalMs: number; }
+export type ShardReadObserver = (event: ShardReadEvent) => void;
 
 // ---------------------------------------------------------------------------
 // Manifest
@@ -140,9 +145,11 @@ export function shardPrefix(hexHash: string): string {
 export async function readShard(
   indexDir: string,
   prefix: string,
+  observer?: ShardReadObserver,
 ): Promise<IndexShard> {
   return readGzipShard(
     path.join(indexDir, "exact", `${prefix}.json.gz`),
+    "exact", prefix, observer,
   ) as Promise<IndexShard>;
 }
 
@@ -153,9 +160,10 @@ export async function readShard(
 export async function lookupExact(
   indexDir: string,
   hexHash: string,
+  observer?: ShardReadObserver,
 ): Promise<IndexHashEntry | null> {
   const prefix = shardPrefix(hexHash);
-  const shard = await readShard(indexDir, prefix);
+  const shard = await readShard(indexDir, prefix, observer);
   if (Object.prototype.hasOwnProperty.call(shard, hexHash)) {
     return shard[hexHash];
   }
@@ -173,9 +181,11 @@ export async function lookupExact(
 export async function readInstructionShard(
   indexDir: string,
   prefix: string,
+  observer?: ShardReadObserver,
 ): Promise<InstructionShard> {
   return readGzipShard(
     path.join(indexDir, "instructions", `${prefix}.json.gz`),
+    "instructions", prefix, observer,
   ) as Promise<InstructionShard>;
 }
 
@@ -187,9 +197,10 @@ export async function readInstructionShard(
 export async function lookupInstructions(
   indexDir: string,
   instructionHex: string,
+  observer?: ShardReadObserver,
 ): Promise<string[] | null> {
   const prefix = shardPrefix(instructionHex);
-  const shard = await readInstructionShard(indexDir, prefix);
+  const shard = await readInstructionShard(indexDir, prefix, observer);
   if (Object.prototype.hasOwnProperty.call(shard, instructionHex)) {
     return shard[instructionHex];
   }
@@ -199,18 +210,22 @@ export async function lookupInstructions(
 export async function readSketchShard(
   indexDir: string,
   prefix: string,
+  observer?: ShardReadObserver,
 ): Promise<SketchShard> {
   return readGzipShard(
     path.join(indexDir, "variants", "sketches", `${prefix}.json.gz`),
+    "variant_sketch", prefix, observer,
   ) as Promise<SketchShard>;
 }
 
 export async function readAnchorShard(
   indexDir: string,
   prefix: string,
+  observer?: ShardReadObserver,
 ): Promise<AnchorShard> {
   return readGzipShard(
     path.join(indexDir, "variants", "anchors", `${prefix}.json.gz`),
+    "variant_anchor", prefix, observer,
   ) as Promise<AnchorShard>;
 }
 
@@ -220,24 +235,37 @@ export async function readAnchorShard(
 
 async function readGzipShard(
   shardPath: string,
+  shardKind?: ShardKind,
+  prefix?: string,
+  observer?: ShardReadObserver,
 ): Promise<Record<string, unknown>> {
+  const totalStart = observer ? performance.now() : 0;
+  let readMs = 0;
+  let gunzipMs = 0;
+  let parseMs = 0;
   let compressed: Buffer;
   try {
+    const started = observer ? performance.now() : 0;
     compressed = await readFile(shardPath);
+    readMs = observer ? performance.now() - started : 0;
   } catch {
     throw new IndexError(`Shard not found: ${shardPath}`);
   }
 
   let decompressed: Buffer;
   try {
+    const started = observer ? performance.now() : 0;
     decompressed = gunzipSync(compressed);
+    gunzipMs = observer ? performance.now() - started : 0;
   } catch {
     throw new IndexError(`Corrupt gzip shard: ${shardPath}`);
   }
 
   let shard: unknown;
   try {
+    const started = observer ? performance.now() : 0;
     shard = JSON.parse(decompressed.toString("utf-8")) as unknown;
+    parseMs = observer ? performance.now() - started : 0;
   } catch {
     throw new IndexError(`Malformed shard JSON: ${shardPath}`);
   }
@@ -246,5 +274,6 @@ async function readGzipShard(
     throw new IndexError(`Invalid shard structure: ${shardPath}`);
   }
 
+  if (observer && shardKind && prefix) observer({ shardKind, prefix, compressedBytes: compressed.length, decompressedBytes: decompressed.length, readMs, gunzipMs, parseMs, totalMs: performance.now() - totalStart });
   return shard as Record<string, unknown>;
 }

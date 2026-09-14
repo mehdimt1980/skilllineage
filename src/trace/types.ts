@@ -3,6 +3,10 @@
  */
 
 import type { IndexOccurrence } from "../index/types.js";
+import type { ShardReadEvent } from "../index/reader.js";
+
+export interface TraceProfiling { stages: Record<string, number>; counts: Record<string, number | boolean>; shardReads: ShardReadEvent[]; }
+export interface TraceProfilingOptions { profile: TraceProfiling; }
 
 export interface TraceReport {
   readonly schemaVersion: "0.1";

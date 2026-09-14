@@ -205,6 +205,20 @@ describe("exact match", () => {
     expect(report.origin.status).toBe("not_inferred");
   });
 
+  it("collects optional profiling without exposing it in the trace report", async () => {
+    const skillContent = "# Skill\nprofile this exact case\n";
+    const skillDir = await makeTempSkill({ "SKILL.md": skillContent });
+    const blobHash = computeGitBlobSha1(Buffer.from(skillContent, "utf-8")).replace(/^sha1:/, "");
+    const indexDir = await makeIndex({ exactShards: { [blobHash.slice(0, 2)]: { [blobHash]: { copyCount: 1, occurrences: [OCCURRENCE_A] } } } });
+    const profile: import("./types.js").TraceProfiling = { stages: {}, counts: {}, shardReads: [] };
+    const report = await traceSkill(skillDir, indexDir, TOOL_VERSION, { profile });
+    expect(report.match.type).toBe("exact");
+    expect("profiling" in report).toBe(false);
+    expect(profile.stages.fingerprintMs).toBeGreaterThanOrEqual(0);
+    expect(profile.stages.exactLookupMs).toBeGreaterThanOrEqual(0);
+    expect(profile.shardReads[0]?.shardKind).toBe("exact");
+  });
+
   it("exact match takes precedence over same_instructions", async () => {
     // Skill with frontmatter — raw sha1 and instruction sha both have matches
     const skillContent = "---\nname: test\n---\n# Skill\n\nDo the thing.\n";

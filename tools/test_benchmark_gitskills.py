@@ -239,6 +239,18 @@ class BenchmarkToolingTests(unittest.TestCase):
         self.assertNotIn("PRIVATE-SKILL-CONTENT", json.dumps(details))
         self.assertEqual(details["queries"][0]["finalRank"], 1)
 
+    def test_profiling_summary_and_slow_ordering(self):
+        def item(identifier, duration):
+            return {"id": identifier, "durationMs": duration, "groundTruthJaccard": 0.8,
+                    "diagnostic": self.diagnostic(finalRank=1, omittedSharedAnchorCount=1),
+                    "profiling": {"stages": {"totalTraceMs": duration}, "counts": {"eligibleCandidateCount": 2},
+                                  "shardReads": [{"shardKind": "variant_anchor", "compressedBytes": 3, "decompressedBytes": 9}]}}
+        rows = [item("b", 10), item("a", 10), item("c", 5)]
+        summary = benchmark.profiling_summary(rows)
+        self.assertEqual(summary["io"]["variant_anchor"]["shardReads"], 3)
+        self.assertEqual(summary["hotAnchors"]["queriesWithOmittedSharedAnchors"], 3)
+        self.assertEqual([row["id"] for row in benchmark.slow_queries(rows)], ["a", "b", "c"])
+
     def test_benchmark_json_serialization(self):
         output = self.root / "nested" / "report.json"
         benchmark.write_report({"schemaVersion": "0.1", "value": 3}, output)
