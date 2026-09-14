@@ -20,11 +20,16 @@ import type {
   InstructionShard,
 } from "../index/types.js";
 import {
+  DEFAULT_ANCHOR_COUNT,
   generateVariantCandidates,
   instructionSketch,
   scoreVariantCandidates,
 } from "../variant/index.js";
-import type { ScoredCandidate } from "../variant/index.js";
+import type {
+  CandidateGenerationDiagnostics,
+  ScoredCandidate,
+  ScoringDiagnostics,
+} from "../variant/index.js";
 import type {
   TraceReport,
   SameInstructionsMatch,
@@ -50,9 +55,17 @@ export async function traceSkill(
   profilingOptions?: TraceProfilingOptions,
 ): Promise<TraceReport> {
   const profile = profilingOptions?.profile;
-  const observer = profile ? (event: import("../index/reader.js").ShardReadEvent) => profile.shardReads.push(event) : undefined;
+  const observer = profile
+    ? (event: import("../index/reader.js").ShardReadEvent) => profile.shardReads.push(event)
+    : undefined;
   const totalStart = profile ? performance.now() : 0;
-  const timed = async <T>(name: string, operation: () => Promise<T>): Promise<T> => { const started = profile ? performance.now() : 0; const value = await operation(); if (profile) profile.stages[name] = performance.now() - started; return value; };
+  const timed = async <T>(name: string, operation: () => Promise<T>): Promise<T> => {
+    const started = profile ? performance.now() : 0;
+    const value = await operation();
+    if (profile) profile.stages[name] = performance.now() - started;
+    return value;
+  };
+
   // Validate index directory exists
   let indexStat;
   try {
@@ -79,7 +92,9 @@ export async function traceSkill(
   const query = { gitBlobSha1, instructionsSha256 };
 
   // Step 1: Exact raw Git blob match — reads exactly one shard
-  const exactEntry = await timed("exactLookupMs", () => lookupExact(indexDir, hexBlobHash, observer));
+  const exactEntry = await timed("exactLookupMs", () =>
+    lookupExact(indexDir, hexBlobHash, observer),
+  );
   if (exactEntry) {
     if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
     return {
@@ -96,10 +111,13 @@ export async function traceSkill(
 
   // Step 2: Same normalized instructions — reads one instruction shard,
   // then at most one exact shard per unique prefix among the matched hashes.
-  const blobHashes = await timed("instructionLookupMs", () => lookupInstructions(indexDir, hexInstructionHash, observer));
+  const blobHashes = await timed("instructionLookupMs", () =>
+    lookupInstructions(indexDir, hexInstructionHash, observer),
+  );
   if (blobHashes && blobHashes.length > 0) {
     const sameInstructionsMatch = await buildSameInstructionsMatch(
-      indexDir, blobHashes,
+      indexDir,
+      blobHashes,
       (dir, prefix) => readShard(dir, prefix, observer),
     );
     if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
@@ -112,24 +130,67 @@ export async function traceSkill(
   }
 
   // Step 3: Approximate variant candidates.
-  const rawSkill = await readFile(path.join(path.resolve(skillPath), "SKILL.md"), "utf-8");
+  const rawSkill = await readFile(
+    path.join(path.resolve(skillPath), "SKILL.md"),
+    "utf-8",
+  );
   const localSketch = instructionSketch(normalizeInstructions(rawSkill));
-  if (profile) { profile.counts.localSketchSize = localSketch.length; profile.counts.localAnchorCount = Math.min(localSketch.length, 8); }
-  const generationStats: import("../variant/index.js").CandidateGenerationDiagnostics = { observedCandidateCount: 0, eligibleCandidateCount: 0, returnedCandidateCount: 0, uniqueAnchorShardCount: 0 };
-  const generated = await timed("variantAnchorGenerationMs", () => generateVariantCandidates(
-    localSketch,
-    (prefix) => readAnchorShard(indexDir, prefix, observer), generationStats,
-  ));
-  if (profile) Object.assign(profile.counts, generationStats, { candidateGenerationTruncated: generated.truncated });
-  const scoringStats: import("../variant/index.js").ScoringDiagnostics = { inputCandidateCount: 0, uniqueSketchShardCount: 0, sketchRecordsFound: 0, passedEstimatedThresholdCount: 0, finalCandidateCount: 0 };
-  const scored = await timed("variantSketchScoringMs", () => scoreVariantCandidates(
-    localSketch,
-    generated.candidates,
-    (prefix) => readSketchShard(indexDir, prefix, observer), scoringStats,
-  ));
-  if (profile) Object.assign(profile.counts, scoringStats);
+  if (profile) {
+    profile.counts.localSketchSize = localSketch.length;
+    profile.counts.localAnchorCount = Math.min(
+      localSketch.length,
+      DEFAULT_ANCHOR_COUNT,
+    );
+  }
+
+  const generationStats: CandidateGenerationDiagnostics | undefined = profile
+    ? {
+        observedCandidateCount: 0,
+        eligibleCandidateCount: 0,
+        returnedCandidateCount: 0,
+        uniqueAnchorShardCount: 0,
+      }
+    : undefined;
+
+  const generated = await timed("variantAnchorGenerationMs", () =>
+    generateVariantCandidates(
+      localSketch,
+      (prefix) => readAnchorShard(indexDir, prefix, observer),
+      generationStats,
+    ),
+  );
+
+  if (profile && generationStats) {
+    Object.assign(profile.counts, generationStats, {
+      candidateGenerationTruncated: generated.truncated,
+    });
+  }
+
+  const scoringStats: ScoringDiagnostics | undefined = profile
+    ? {
+        inputCandidateCount: 0,
+        uniqueSketchShardCount: 0,
+        sketchRecordsFound: 0,
+        passedEstimatedThresholdCount: 0,
+        finalCandidateCount: 0,
+      }
+    : undefined;
+
+  const scored = await timed("variantSketchScoringMs", () =>
+    scoreVariantCandidates(
+      localSketch,
+      generated.candidates,
+      (prefix) => readSketchShard(indexDir, prefix, observer),
+      scoringStats,
+    ),
+  );
+
+  if (profile && scoringStats) Object.assign(profile.counts, scoringStats);
+
   if (scored.length > 0) {
-    const candidates = await timed("variantEnrichmentMs", () => enrichVariantCandidates(indexDir, scored, observer, profile));
+    const candidates = await timed("variantEnrichmentMs", () =>
+      enrichVariantCandidates(indexDir, scored, observer, profile),
+    );
     if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
     return {
       schemaVersion: "0.1",
@@ -173,7 +234,11 @@ async function enrichVariantCandidates(
     const instructionPrefix = shardPrefix(candidate.instructionsSha256);
     let instructionShard = instructionCache.get(instructionPrefix);
     if (!instructionShard) {
-      instructionShard = await readInstructionShard(indexDir, instructionPrefix, observer);
+      instructionShard = await readInstructionShard(
+        indexDir,
+        instructionPrefix,
+        observer,
+      );
       instructionCache.set(instructionPrefix, instructionShard);
     }
     const blobHashes = [
@@ -209,7 +274,11 @@ async function enrichVariantCandidates(
       })),
     });
   }
-  if (profile) { profile.counts.enrichmentInstructionShardCount = instructionCache.size; profile.counts.enrichmentExactShardCount = exactCache.size; }
+
+  if (profile) {
+    profile.counts.enrichmentInstructionShardCount = instructionCache.size;
+    profile.counts.enrichmentExactShardCount = exactCache.size;
+  }
   return result;
 }
 
@@ -243,7 +312,9 @@ export async function buildSameInstructionsMatch(
 ): Promise<SameInstructionsMatch> {
   const distinctBlobHashes = [...new Set(blobHashes)].sort();
 
-  // Group hashes by exact-shard prefix to minimise shard reads
+  // Group hashes by their exact-shard prefix, reads each required
+  // exact shard at most once, collects all occurrences, deduplicates,
+  // then sorts deterministically.
   const byPrefix = new Map<string, string[]>();
   for (const h of distinctBlobHashes) {
     const pfx = shardPrefix(h);
@@ -261,7 +332,10 @@ export async function buildSameInstructionsMatch(
   for (const [pfx, hashes] of byPrefix) {
     const shard = await readExactShard(indexDir, pfx);
     for (const h of hashes) {
-      const entry: IndexHashEntry | undefined = Object.prototype.hasOwnProperty.call(shard, h)
+      const entry: IndexHashEntry | undefined = Object.prototype.hasOwnProperty.call(
+        shard,
+        h,
+      )
         ? shard[h]
         : undefined;
       if (entry) {
@@ -277,7 +351,12 @@ export async function buildSameInstructionsMatch(
 
   // Sort occurrences deterministically: repoFullName then path
   const allOccurrences = [...occurrencesByLocation.values()].sort((a, b) => {
-    const r = a.repoFullName < b.repoFullName ? -1 : a.repoFullName > b.repoFullName ? 1 : 0;
+    const r =
+      a.repoFullName < b.repoFullName
+        ? -1
+        : a.repoFullName > b.repoFullName
+          ? 1
+          : 0;
     if (r !== 0) return r;
     return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
   });
