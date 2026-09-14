@@ -24,7 +24,8 @@ async function makeExactShard(data: IndexShard): Promise<string> {
 
 afterEach(async () => {
   while (tempDirs.length > 0) {
-    await rm(tempDirs.pop()!, { recursive: true, force: true });
+    const dir = tempDirs.pop();
+    if (dir) await rm(dir, { recursive: true, force: true });
   }
 });
 
