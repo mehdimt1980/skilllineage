@@ -14,10 +14,22 @@ export interface PreScoreCandidate {
 export interface CandidateGenerationResult {
   readonly candidates: readonly PreScoreCandidate[];
   readonly truncated: boolean;
-  readonly diagnostics?: CandidateGenerationDiagnostics;
 }
-export interface CandidateGenerationDiagnostics { observedCandidateCount: number; eligibleCandidateCount: number; returnedCandidateCount: number; uniqueAnchorShardCount: number; }
-export interface ScoringDiagnostics { inputCandidateCount: number; uniqueSketchShardCount: number; sketchRecordsFound: number; passedEstimatedThresholdCount: number; finalCandidateCount: number; }
+
+export interface CandidateGenerationDiagnostics {
+  observedCandidateCount: number;
+  eligibleCandidateCount: number;
+  returnedCandidateCount: number;
+  uniqueAnchorShardCount: number;
+}
+
+export interface ScoringDiagnostics {
+  inputCandidateCount: number;
+  uniqueSketchShardCount: number;
+  sketchRecordsFound: number;
+  passedEstimatedThresholdCount: number;
+  finalCandidateCount: number;
+}
 
 export interface ScoredCandidate extends PreScoreCandidate {
   readonly instructionsSha256: string;
@@ -61,7 +73,16 @@ export async function generateVariantCandidates(
     candidates: eligible.slice(0, MAX_PRE_SCORE_CANDIDATES),
     truncated: eligible.length > MAX_PRE_SCORE_CANDIDATES,
   };
-  if (diagnostics) Object.assign(diagnostics, { observedCandidateCount: counts.size, eligibleCandidateCount: eligible.length, returnedCandidateCount: result.candidates.length, uniqueAnchorShardCount: byPrefix.size });
+
+  if (diagnostics) {
+    Object.assign(diagnostics, {
+      observedCandidateCount: counts.size,
+      eligibleCandidateCount: eligible.length,
+      returnedCandidateCount: result.candidates.length,
+      uniqueAnchorShardCount: byPrefix.size,
+    });
+  }
+
   return result;
 }
 
@@ -109,7 +130,17 @@ export async function scoreVariantCandidates(
         compareStrings(a.instructionsSha256, b.instructionsSha256),
     )
     .slice(0, MAX_FINAL_CANDIDATES);
-  if (diagnostics) Object.assign(diagnostics, { inputCandidateCount: candidates.length, uniqueSketchShardCount: byPrefix.size, sketchRecordsFound: found, passedEstimatedThresholdCount: scored.length, finalCandidateCount: result.length });
+
+  if (diagnostics) {
+    Object.assign(diagnostics, {
+      inputCandidateCount: candidates.length,
+      uniqueSketchShardCount: byPrefix.size,
+      sketchRecordsFound: found,
+      passedEstimatedThresholdCount: scored.length,
+      finalCandidateCount: result.length,
+    });
+  }
+
   return result;
 }
 
