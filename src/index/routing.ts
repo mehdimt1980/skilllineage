@@ -7,13 +7,13 @@ export interface VariantSketchRoute {
 }
 
 /**
- * Route a variant id to its schema-0.3 sketch micro-shard.
+ * Route a 96-bit variant id to its schema-0.3 sketch micro-shard.
  *
  * Example: a1b2c3... -> variants/sketches/a1/b2.json.gz
  */
 export function variantSketchRoute(variantId: string): VariantSketchRoute {
   const normalized = variantId.toLowerCase();
-  if (!/^[0-9a-f]{4}/.test(normalized)) {
+  if (!/^[0-9a-f]{24}$/.test(normalized)) {
     throw new Error(`Invalid variant id for sketch routing: ${variantId}`);
   }
   const directory = normalized.slice(0, 2);
