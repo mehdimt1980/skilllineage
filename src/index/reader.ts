@@ -11,6 +11,7 @@ import type {
   SketchShard,
   AnchorShard,
 } from "./types.js";
+import { VARIANT_SKETCH_SHARD_ROUTING } from "./routing.js";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -65,7 +66,7 @@ export async function readManifest(indexDir: string): Promise<IndexManifest> {
     );
   }
 
-  if (m.schemaVersion !== "0.2") {
+  if (m.schemaVersion !== "0.3") {
     throw new IndexError(
       `Unsupported schema version: ${String(m.schemaVersion)}. Rebuild the index with the current builder.`,
     );
@@ -93,7 +94,7 @@ export async function readManifest(indexDir: string): Promise<IndexManifest> {
   }
 
   if (!isCompatibleVariantIndex(m.variantIndex)) {
-    throw new IndexError(`Unsupported variant index parameters or anchor shard routing: ${manifestPath}. Rebuild the index with the current builder.`);
+    throw new IndexError(`Unsupported variant index parameters or shard routing: ${manifestPath}. Rebuild the index with the current builder.`);
   }
 
   return manifest as IndexManifest;
@@ -110,6 +111,7 @@ function isCompatibleVariantIndex(value: unknown): boolean {
     v.anchorCount === 8 &&
     v.maxAnchorPostings === 2000 &&
     v.anchorShardRouting === "sha256-anchor-hex-v1" &&
+    v.sketchShardRouting === VARIANT_SKETCH_SHARD_ROUTING &&
     typeof v.skippedHotAnchorCount === "number"
   );
 }
@@ -207,14 +209,24 @@ export async function lookupInstructions(
   return null;
 }
 
+/**
+ * Read a schema-0.3 variant sketch micro-shard.
+ * Route keys are stable physical identifiers such as "a1/b2".
+ * Missing micro-shards represent an empty route and are therefore valid.
+ */
 export async function readSketchShard(
   indexDir: string,
-  prefix: string,
+  routeKey: string,
   observer?: ShardReadObserver,
 ): Promise<SketchShard> {
+  const normalized = routeKey.toLowerCase();
+  if (!/^[0-9a-f]{2}\/[0-9a-f]{2}$/.test(normalized)) {
+    throw new IndexError(`Invalid variant sketch route: ${routeKey}`);
+  }
+  const [directory, file] = normalized.split("/");
   return readGzipShard(
-    path.join(indexDir, "variants", "sketches", `${prefix}.json.gz`),
-    "variant_sketch", prefix, observer,
+    path.join(indexDir, "variants", "sketches", directory, `${file}.json.gz`),
+    "variant_sketch", normalized, observer, true,
   ) as Promise<SketchShard>;
 }
 
@@ -238,6 +250,7 @@ async function readGzipShard(
   shardKind?: ShardKind,
   prefix?: string,
   observer?: ShardReadObserver,
+  missingAsEmpty = false,
 ): Promise<Record<string, unknown>> {
   const totalStart = observer ? performance.now() : 0;
   let readMs = 0;
@@ -248,7 +261,8 @@ async function readGzipShard(
     const started = observer ? performance.now() : 0;
     compressed = await readFile(shardPath);
     readMs = observer ? performance.now() - started : 0;
-  } catch {
+  } catch (error) {
+    if (missingAsEmpty && isFileNotFound(error)) return {};
     throw new IndexError(`Shard not found: ${shardPath}`);
   }
 
@@ -276,4 +290,9 @@ async function readGzipShard(
 
   if (observer && shardKind && prefix) observer({ shardKind, prefix, compressedBytes: compressed.length, decompressedBytes: decompressed.length, readMs, gunzipMs, parseMs, totalMs: performance.now() - totalStart });
   return shard as Record<string, unknown>;
+}
+
+function isFileNotFound(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error &&
+    (error as NodeJS.ErrnoException).code === "ENOENT";
 }
