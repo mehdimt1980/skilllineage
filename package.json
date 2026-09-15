@@ -20,7 +20,7 @@
     "build": "tsc",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && python -m unittest tools/test_benchmark_gitskills.py",
+    "test": "vitest run && python -m unittest tools/test_benchmark_gitskills.py tools/test_benchmark_microshards.py",
     "test:watch": "vitest",
     "prepack": "npm run build"
   },

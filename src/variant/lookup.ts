@@ -1,4 +1,5 @@
 import { DEFAULT_ANCHOR_COUNT, anchorShardPrefix, estimateSketchSimilarity } from "./sketch.js";
+import { variantSketchRoute } from "../index/routing.js";
 import type { AnchorShard, SketchShard } from "../index/types.js";
 
 export const MIN_SHARED_ANCHORS = 2;
@@ -89,21 +90,21 @@ export async function generateVariantCandidates(
 export async function scoreVariantCandidates(
   localSketch: readonly string[],
   candidates: readonly PreScoreCandidate[],
-  readSketchShard: (prefix: string) => Promise<SketchShard>,
+  readSketchShard: (routeKey: string) => Promise<SketchShard>,
   diagnostics?: ScoringDiagnostics,
 ): Promise<ScoredCandidate[]> {
-  const byPrefix = new Map<string, PreScoreCandidate[]>();
+  const byRoute = new Map<string, PreScoreCandidate[]>();
   for (const candidate of candidates) {
-    const prefix = candidate.variantId.slice(0, 2);
-    const group = byPrefix.get(prefix) ?? [];
+    const routeKey = variantSketchRoute(candidate.variantId).key;
+    const group = byRoute.get(routeKey) ?? [];
     group.push(candidate);
-    byPrefix.set(prefix, group);
+    byRoute.set(routeKey, group);
   }
 
   const scored: ScoredCandidate[] = [];
   let found = 0;
-  for (const [prefix, groupedCandidates] of byPrefix) {
-    const shard = await readSketchShard(prefix);
+  for (const [routeKey, groupedCandidates] of byRoute) {
+    const shard = await readSketchShard(routeKey);
     for (const candidate of groupedCandidates) {
       if (!Object.prototype.hasOwnProperty.call(shard, candidate.variantId)) continue;
       found++;
@@ -134,7 +135,7 @@ export async function scoreVariantCandidates(
   if (diagnostics) {
     Object.assign(diagnostics, {
       inputCandidateCount: candidates.length,
-      uniqueSketchShardCount: byPrefix.size,
+      uniqueSketchShardCount: byRoute.size,
       sketchRecordsFound: found,
       passedEstimatedThresholdCount: scored.length,
       finalCandidateCount: result.length,

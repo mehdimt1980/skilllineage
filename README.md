@@ -104,6 +104,8 @@ Implemented:
 - [x] approximate global variant candidate retrieval
 - [x] GitHub Actions CI on Node.js 22 and 24
 - [x] manual real-GitSkills benchmark harness
+- [x] full-scale retrieval profiling
+- [x] schema-0.3 variant-sketch micro-sharding
 
 Planned:
 
@@ -158,6 +160,22 @@ tools/
 
 The analysis engines are intentionally kept independent from CLI presentation so they can later be reused from CI, GitHub Actions, or other applications.
 
+## Index schema 0.3
+
+Schema 0.3 changes only the physical layout of the variant-sketch store. Exact and normalized-instruction shards remain two-hex shards, and anchor routing remains `sha256-anchor-hex-v1`.
+
+Variant sketches now use four hex characters of the `variantId` as a two-level physical route:
+
+```text
+variants/sketches/a1/b2.json.gz
+```
+
+for a variant ID beginning with `a1b2...`. Only non-empty sketch micro-shards are written. Missing sketch micro-shards are interpreted as empty routes; missing exact, instruction, and anchor shards retain their stricter behavior.
+
+The matching algorithm is unchanged: normalization, 5-token shingles, bottom-32 sketching, anchor generation, estimated similarity, thresholds, caps, ranking, enrichment, and trace precedence are identical. This is an I/O/layout optimization designed to avoid decompressing large amounts of irrelevant sketch data during scoring.
+
+Schema-0.2 indexes are not compatible with the schema-0.3 reader and must be rebuilt with the current builder.
+
 ## Continuous Integration
 
 GitHub Actions runs linting, type checking, synthetic tests, and the build on Ubuntu with Node.js 22 and 24 plus Python 3.13. A separate Windows job runs tests and the build with Node.js 24 and Python 3.13 to catch filesystem and path regressions. CI uses read-only repository permissions and never downloads GitSkills or runs real-data benchmarks.
@@ -179,9 +197,9 @@ python tools/benchmark-gitskills.py \
 
 The harness deterministically samples real Skills and measures index size, in-process trace latency, exact and same-instruction hit rates, and Recall@1/3/10 for controlled light and medium mutations. It does not modify or download the source dataset, and it is not run by CI. Use `--keep-temp` only when fixture inspection is needed.
 
-Benchmark schema 0.2 also profiles the real retrieval pipeline: shard I/O, compressed and decompressed bytes, stage timings, candidate progression, hot-anchor omission evidence, and deterministic slow-query summaries. This diagnostic profiling does not alter trace semantics or require an index rebuild. Timings depend strongly on storage, OS, and cache state; benchmark output never includes Skill source text.
+Benchmark schema 0.2 also profiles the real retrieval pipeline: shard I/O, compressed and decompressed bytes, stage timings, candidate progression, hot-anchor omission evidence, and deterministic slow-query summaries. This diagnostic profiling does not alter trace semantics. Timings depend strongly on storage, operating system, and cache state; benchmark output never includes Skill source text.
 
-Variant retrieval is approximate. The benchmark reports exact normalized 5-token-shingle Jaccard similarity separately from sketch-estimated similarity, including recall for mutations with exact similarity at least 0.70. Aggregate diagnostics identify candidate-generation and filtering misses; optional `--details-output` records per-query diagnostics without Skill source text. Rebuild older indexes with the current builder before tracing or benchmarking because anchor shard routing changed in index schema 0.2.
+Variant retrieval is approximate. The benchmark reports exact normalized 5-token-shingle Jaccard similarity separately from sketch-estimated similarity, including recall for mutations with exact similarity at least 0.70. Aggregate diagnostics identify candidate-generation and filtering misses; optional `--details-output` records per-query diagnostics without Skill source text. Rebuild schema-0.2 and older indexes with the current builder before tracing or benchmarking.
 
 ## GitSkills attribution
 

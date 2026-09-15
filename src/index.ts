@@ -30,6 +30,8 @@ export {
   readAnchorShard,
   readSketchShard,
   shardPrefix,
+  VARIANT_SKETCH_SHARD_ROUTING,
+  variantSketchRoute,
   IndexError,
 } from "./index/index.js";
 export type {
@@ -46,6 +48,7 @@ export type {
   SketchShard,
   AnchorShard,
   VariantSketchRecord,
+  VariantSketchRoute,
 } from "./index/index.js";
 export {
   estimateSketchSimilarity,

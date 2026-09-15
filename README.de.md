@@ -104,6 +104,8 @@ Implementiert:
 - [x] approximative globale Suche nach Varianten-Kandidaten
 - [x] GitHub-Actions-CI mit Node.js 22 und 24
 - [x] manueller Benchmark für echte GitSkills-Daten
+- [x] Full-Scale-Retrieval-Profiling
+- [x] Schema-0.3-Microsharding für Variant-Sketches
 
 Geplant:
 
@@ -158,6 +160,22 @@ tools/
 
 Die Analyse-Engines sind bewusst von der CLI-Darstellung getrennt, damit sie später auch in CI, GitHub Actions oder anderen Anwendungen wiederverwendet werden können.
 
+## Indexschema 0.3
+
+Schema 0.3 ändert ausschließlich das physische Layout des Variant-Sketch-Stores. Exact- und normalisierte Instruction-Shards bleiben Zwei-Hex-Shards; das Anchor-Routing bleibt unverändert `sha256-anchor-hex-v1`.
+
+Variant-Sketches verwenden jetzt die ersten vier Hex-Zeichen der `variantId` als zweistufige physische Route:
+
+```text
+variants/sketches/a1/b2.json.gz
+```
+
+für eine Variant-ID, die mit `a1b2...` beginnt. Es werden nur nichtleere Sketch-Microshards geschrieben. Fehlende Sketch-Microshards gelten als leere Route; für fehlende Exact-, Instruction- und Anchor-Shards bleibt das strengere Verhalten unverändert.
+
+Der Matching-Algorithmus selbst ändert sich nicht: Normalisierung, 5-Token-Shingles, Bottom-32-Sketch, Anchor-Generierung, geschätzte Similarity, Schwellenwerte, Caps, Ranking, Enrichment und Trace-Priorität bleiben identisch. Es handelt sich um eine reine I/O-/Layout-Optimierung, damit beim Scoring nicht große Mengen irrelevanter Sketch-Daten dekomprimiert werden müssen.
+
+Schema-0.2-Indizes sind nicht mit dem Schema-0.3-Reader kompatibel und müssen mit dem aktuellen Builder neu erzeugt werden.
+
 ## Continuous Integration
 
 GitHub Actions führt Linting, Type-Checks, synthetische Tests und den Build unter Ubuntu mit Node.js 22 und 24 sowie Python 3.13 aus. Ein zusätzlicher Windows-Job führt Tests und Build mit Node.js 24 und Python 3.13 aus, um Dateisystem- und Pfadregressionen zu erkennen. Die CI besitzt ausschließlich Leserechte und lädt weder GitSkills herunter noch führt sie Benchmarks mit Echtdaten aus.
@@ -179,9 +197,9 @@ python tools/benchmark-gitskills.py \
 
 Die Harness zieht deterministische Stichproben realer Skills und misst Indexgröße, In-Process-Trace-Latenz, Exact- und Same-Instructions-Trefferraten sowie Recall@1/3/10 für kontrollierte leichte und mittlere Mutationen. Sie verändert oder lädt den Quelldatensatz nicht herunter und läuft nicht in der CI. `--keep-temp` dient ausschließlich der gezielten Untersuchung erzeugter Fixtures.
 
-Das Benchmarkschema 0.2 profiliert zusätzlich den echten Retrieval-Pfad: Shard-I/O, komprimierte und dekomprimierte Bytes, Stage-Timings, Kandidatenentwicklung, Hinweise auf ausgelassene Hot-Anchors und deterministische Slow-Query-Zusammenfassungen. Dieses diagnostische Profiling verändert die Trace-Semantik nicht und benötigt keinen Index-Neubau. Timing-Werte hängen stark von Speicher, Betriebssystem und Cache-Zustand ab; Benchmark-Ausgaben enthalten niemals Skill-Quelltext.
+Das Benchmarkschema 0.2 profiliert zusätzlich den echten Retrieval-Pfad: Shard-I/O, komprimierte und dekomprimierte Bytes, Stage-Timings, Kandidatenentwicklung, Hinweise auf ausgelassene Hot-Anchors und deterministische Slow-Query-Zusammenfassungen. Dieses diagnostische Profiling verändert die Trace-Semantik nicht. Timing-Werte hängen stark von Speicher, Betriebssystem und Cache-Zustand ab; Benchmark-Ausgaben enthalten niemals Skill-Quelltext.
 
-Die Variantensuche ist approximativ. Der Benchmark meldet den exakten Jaccard-Wert normalisierter 5-Token-Shingles getrennt von der Sketch-Schätzung, einschließlich Recall für Mutationen mit einem exakten Wert von mindestens 0,70. Aggregierte Diagnosen zeigen Verluste bei Kandidatengenerierung und Filterung; `--details-output` schreibt bei Bedarf Einzeldiagnosen ohne Skill-Quelltext. Ältere Indizes müssen wegen der geänderten Anchor-Shard-Zuordnung im Indexschema 0.2 mit dem aktuellen Builder neu erstellt werden.
+Die Variantensuche ist approximativ. Der Benchmark meldet den exakten Jaccard-Wert normalisierter 5-Token-Shingles getrennt von der Sketch-Schätzung, einschließlich Recall für Mutationen mit einem exakten Wert von mindestens 0,70. Aggregierte Diagnosen zeigen Verluste bei Kandidatengenerierung und Filterung; `--details-output` schreibt bei Bedarf Einzeldiagnosen ohne Skill-Quelltext. Schema-0.2- und ältere Indizes müssen vor Trace oder Benchmark mit dem aktuellen Builder neu erzeugt werden.
 
 ## GitSkills-Hinweis
 

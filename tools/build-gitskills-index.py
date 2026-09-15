@@ -14,13 +14,14 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import sys
 import tempfile
 from pathlib import Path
 
 
-SCHEMA_VERSION = "0.2"
+SCHEMA_VERSION = "0.3"
 KIND = "skilllineage-exact-index"
 SHARD_PREFIX_LENGTH = 2
 SHINGLE_SIZE = 5
@@ -29,11 +30,21 @@ SKETCH_SIZE = 32
 ANCHOR_COUNT = 8
 MAX_ANCHOR_POSTINGS = 2000
 ANCHOR_SHARD_ROUTING = "sha256-anchor-hex-v1"
+SKETCH_SHARD_ROUTING = "variant-id-hex4-v1"
 
 
 def anchor_shard_prefix(anchor: str) -> str:
     """SHA-256 of the unchanged lowercase anchor hex, truncated to one byte."""
     return hashlib.sha256(anchor.encode("utf-8")).hexdigest()[:SHARD_PREFIX_LENGTH]
+
+
+def variant_sketch_route(variant_id: str):
+    """Return the two-level schema-0.3 physical route for a variant id."""
+    normalized = variant_id.lower()
+    if len(normalized) < 4 or any(ch not in "0123456789abcdef" for ch in normalized[:4]):
+        raise ValueError(f"invalid variant id for sketch routing: {variant_id}")
+    return normalized[:2], normalized[2:4]
+
 
 # All 256 possible 2-hex prefixes in sorted order
 ALL_PREFIXES = [f"{i:02x}" for i in range(256)]
@@ -45,7 +56,6 @@ ALL_PREFIXES = [f"{i:02x}" for i in range(256)]
 # Must exactly reproduce SkillLineage TypeScript normalizeInstructions().
 # Inspect src/fingerprint/fingerprint.ts for the canonical implementation.
 # ---------------------------------------------------------------------------
-
 def normalize_instructions(raw: str) -> str:
     """
     Normalize SKILL.md content to its canonical instruction body.
@@ -62,11 +72,9 @@ def normalize_instructions(raw: str) -> str:
     """
     text = raw
 
-    # 1. Strip UTF-8 BOM
     if text and text[0] == "\ufeff":
         text = text[1:]
 
-    # 2. Strip YAML frontmatter
     if text.startswith("---\n") or text.startswith("---\r\n"):
         after_first = text.index("\n") + 1
         rest = text[after_first:]
@@ -74,28 +82,17 @@ def normalize_instructions(raw: str) -> str:
         if close_idx != -1:
             text = rest[close_idx:]
 
-    # 3. Normalize line endings
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-
-    # 4. Strip trailing spaces and tabs from every line
     text = "\n".join(line.rstrip(" \t") for line in text.split("\n"))
-
-    # 5. Remove leading and trailing blank lines
     text = text.lstrip("\n")
     text = text.rstrip("\n")
-
-    # 6. Exactly one final newline
     text = text + "\n"
 
     return text
 
 
 def _find_frontmatter_close(text: str) -> int:
-    """
-    Find position immediately after the closing '---' line.
-    Returns -1 if not found.
-    Mirrors TypeScript findFrontmatterClose().
-    """
+    """Find position immediately after the closing '---' line."""
     i = 0
     while i < len(text):
         line_end = text.find("\n", i)
@@ -149,9 +146,9 @@ def instruction_sketch(normalized: str):
 # ---------------------------------------------------------------------------
 # Deterministic gzip
 # ---------------------------------------------------------------------------
-
 def write_gz_shard(shard_path: Path, data: dict) -> None:
     """Write data as deterministic gzipped JSON (mtime=0)."""
+    shard_path.parent.mkdir(parents=True, exist_ok=True)
     if data:
         json_text = json.dumps(
             data, indent=2, sort_keys=False, ensure_ascii=False
@@ -169,7 +166,6 @@ def write_gz_shard(shard_path: Path, data: dict) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-
 def main():
     parser = argparse.ArgumentParser(
         description="Build a SkillLineage dual index from GitSkills."
@@ -203,6 +199,13 @@ def main():
     instructions_dir = out_dir / "instructions"
     sketches_dir = out_dir / "variants" / "sketches"
     anchors_dir = out_dir / "variants" / "anchors"
+
+    # Sketch schema 0.3 is sparse. Clear the sketch namespace so a rebuild into
+    # an existing output directory cannot retain obsolete schema-0.2 flat
+    # shards or stale schema-0.3 micro-shards from a previous dataset.
+    if sketches_dir.exists():
+        shutil.rmtree(sketches_dir)
+
     exact_dir.mkdir(parents=True, exist_ok=True)
     instructions_dir.mkdir(parents=True, exist_ok=True)
     sketches_dir.mkdir(parents=True, exist_ok=True)
@@ -211,7 +214,6 @@ def main():
     conn = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
 
-    # Use a temp file for the instruction-mapping SQLite state
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db", prefix="skilllineage-build-")
     os.close(tmp_fd)
 
@@ -260,6 +262,7 @@ def main():
             "anchorCount": ANCHOR_COUNT,
             "maxAnchorPostings": MAX_ANCHOR_POSTINGS,
             "anchorShardRouting": ANCHOR_SHARD_ROUTING,
+            "sketchShardRouting": SKETCH_SHARD_ROUTING,
             "skippedHotAnchorCount": skipped_hot_anchor_count,
         },
     }
@@ -279,12 +282,7 @@ def main():
 # ---------------------------------------------------------------------------
 # Exact index — all 256 shards
 # ---------------------------------------------------------------------------
-
 def build_exact_index(conn, exact_dir: Path):
-    """
-    Stream artifacts sorted by file_sha, emit one exact shard per prefix.
-    Always writes all 256 shards (empty shards write {}).
-    """
     query = """
         SELECT
             a.file_sha,
@@ -303,13 +301,11 @@ def build_exact_index(conn, exact_dir: Path):
     """
 
     cursor = conn.execute(query)
-
     record_count = 0
     distinct_hash_count = 0
     previous_hash = None
     current_prefix = None
     current_shard = {}
-
     prefix_iter = iter(ALL_PREFIXES)
     next_prefix = next(prefix_iter)
 
@@ -337,15 +333,12 @@ def build_exact_index(conn, exact_dir: Path):
         prefix = file_sha_lower[:SHARD_PREFIX_LENGTH]
 
         if current_prefix is not None and prefix != current_prefix:
-            # Write the completed shard
             _finalize_exact_shard(current_shard)
             write_gz_shard(exact_dir / f"{current_prefix}.json.gz", current_shard)
-            # Fill any skipped empty prefixes
             flush_empty_shards_up_to(prefix)
             current_shard = {}
 
         current_prefix = prefix
-        # Advance the prefix tracker
         if next_prefix is not None and next_prefix <= prefix:
             while next_prefix is not None and next_prefix <= prefix:
                 try:
@@ -377,15 +370,12 @@ def build_exact_index(conn, exact_dir: Path):
         entry["occurrences"].append(occurrence)
         record_count += 1
 
-    # Flush last populated shard
     if current_prefix is not None and current_shard:
         _finalize_exact_shard(current_shard)
         write_gz_shard(exact_dir / f"{current_prefix}.json.gz", current_shard)
-        # Fill any remaining prefixes after the last populated one
         if next_prefix is not None:
-            flush_empty_shards_up_to("zz")  # past all valid hex prefixes
+            flush_empty_shards_up_to("zz")
 
-    # Fill any remaining prefixes that had no data at all
     for pfx in ALL_PREFIXES:
         shard_path = exact_dir / f"{pfx}.json.gz"
         if not shard_path.exists():
@@ -395,10 +385,8 @@ def build_exact_index(conn, exact_dir: Path):
 
 
 def _finalize_exact_shard(shard_data: dict) -> None:
-    """Sort occurrences and keys in-place before writing."""
     for entry in shard_data.values():
         entry["occurrences"].sort(key=lambda o: (o["repoFullName"], o["path"]))
-    # Re-order shard_data keys lexicographically (mutates in place via rebuild)
     sorted_keys = sorted(shard_data.keys())
     items = {k: shard_data[k] for k in sorted_keys}
     shard_data.clear()
@@ -408,21 +396,10 @@ def _finalize_exact_shard(shard_data: dict) -> None:
 # ---------------------------------------------------------------------------
 # Instruction index — streaming via temp SQLite, all 256 shards
 # ---------------------------------------------------------------------------
-
 def build_instruction_index(
     conn, instructions_dir: Path, sketches_dir: Path, anchors_dir: Path,
     tmp_db_path: str
 ):
-    """
-    Build the instruction index using disk-backed temp SQLite.
-
-    Approach:
-      1. Stream representative rows (one per distinct file_sha content)
-      2. Normalize content, compute instruction SHA-256
-      3. Insert (instruction_sha256, file_sha) pairs into temp SQLite
-      4. Stream temp table sorted by instruction_sha256, file_sha
-      5. Write instruction shards (all 256, empty ones get {})
-    """
     tmp_conn = sqlite3.connect(tmp_db_path)
     try:
         return _populate_instruction_index(
@@ -435,7 +412,6 @@ def build_instruction_index(
 def _populate_instruction_index(
     conn, instructions_dir: Path, sketches_dir: Path, anchors_dir: Path, tmp_conn
 ):
-    """Populate and emit instruction shards using an open temporary database."""
     tmp_conn.execute("PRAGMA temp_store = FILE")
     tmp_conn.execute("""
         CREATE TABLE instr_map (
@@ -460,10 +436,6 @@ def _populate_instruction_index(
         ) WITHOUT ROWID
     """)
 
-    # Select exactly one deterministic representative for every distinct raw
-    # SKILL.md hash. Empty-string content is usable; only NULL is missing.
-    # MAX is deterministic and harmless for a content-addressed hash: all
-    # non-NULL representatives for the same file_sha should have equal content.
     rep_query = """
         SELECT
             LOWER(a.file_sha) AS file_sha,
@@ -478,7 +450,6 @@ def _populate_instruction_index(
     cursor = conn.execute(rep_query)
     indexed_count = 0
     skipped_count = 0
-
     batch = []
     BATCH_SIZE = 1000
 
@@ -537,37 +508,29 @@ def _populate_instruction_index(
         )
     tmp_conn.commit()
 
-    # Stream sorted pairs and write instruction shards (all 256)
     stream_query = """
         SELECT instruction_sha256, file_sha
         FROM instr_map
         ORDER BY instruction_sha256, file_sha
     """
-
     stream_cursor = tmp_conn.execute(stream_query)
-
     current_prefix = None
-    current_shard = {}  # instruction_sha256 -> set of file_sha strings
+    current_shard = {}
 
     for instr_sha, file_sha in stream_cursor:
         prefix = instr_sha[:SHARD_PREFIX_LENGTH]
-
         if current_prefix is not None and prefix != current_prefix:
             _write_instruction_shard(instructions_dir, current_prefix, current_shard)
             current_shard = {}
-
         current_prefix = prefix
-
         if instr_sha not in current_shard:
             current_shard[instr_sha] = []
         if file_sha not in current_shard[instr_sha]:
             current_shard[instr_sha].append(file_sha)
 
-    # Flush last instruction shard
     if current_prefix is not None and current_shard:
         _write_instruction_shard(instructions_dir, current_prefix, current_shard)
 
-    # Write all missing (empty) instruction shards
     for pfx in ALL_PREFIXES:
         shard_path = instructions_dir / f"{pfx}.json.gz"
         if not shard_path.exists():
@@ -580,10 +543,6 @@ def _populate_instruction_index(
 
 
 def _write_instruction_shard(instructions_dir: Path, prefix: str, shard_data: dict) -> None:
-    """
-    Finalize and write an instruction shard.
-    Sort keys lexicographically; sort each file_sha list lexicographically.
-    """
     sorted_shard = {}
     for key in sorted(shard_data.keys()):
         sorted_shard[key] = sorted(shard_data[key])
@@ -591,25 +550,31 @@ def _write_instruction_shard(instructions_dir: Path, prefix: str, shard_data: di
 
 
 def _write_variant_sketches(tmp_conn, sketches_dir: Path) -> None:
-    current_prefix = None
+    current_route = None
     current_shard = {}
     rows = tmp_conn.execute(
         "SELECT variant_id, instructions_sha256, sketch_json "
         "FROM variant_sketches ORDER BY variant_id"
     )
     for variant_id, instr_sha, sketch_json in rows:
-        prefix = variant_id[:SHARD_PREFIX_LENGTH]
-        if current_prefix is not None and prefix != current_prefix:
-            write_gz_shard(sketches_dir / f"{current_prefix}.json.gz", current_shard)
+        directory, file_prefix = variant_sketch_route(variant_id)
+        route = (directory, file_prefix)
+        if current_route is not None and route != current_route:
+            write_gz_shard(
+                sketches_dir / current_route[0] / f"{current_route[1]}.json.gz",
+                current_shard,
+            )
             current_shard = {}
-        current_prefix = prefix
+        current_route = route
         current_shard[variant_id] = {
             "instructionsSha256": instr_sha,
             "sketch": json.loads(sketch_json),
         }
-    if current_prefix is not None:
-        write_gz_shard(sketches_dir / f"{current_prefix}.json.gz", current_shard)
-    _write_missing_shards(sketches_dir)
+    if current_route is not None:
+        write_gz_shard(
+            sketches_dir / current_route[0] / f"{current_route[1]}.json.gz",
+            current_shard,
+        )
 
 
 def _write_variant_anchors(tmp_conn, anchors_dir: Path) -> int:

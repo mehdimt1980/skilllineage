@@ -5,7 +5,7 @@ import { performance } from "node:perf_hooks";
 
 import { traceSkill } from "../dist/index.js";
 import { normalizeInstructions } from "../dist/fingerprint/index.js";
-import { readAnchorShard, readSketchShard } from "../dist/index/index.js";
+import { readAnchorShard, readSketchShard, variantSketchRoute } from "../dist/index/index.js";
 import {
   DEFAULT_ANCHOR_COUNT,
   MIN_ESTIMATED_SIMILARITY,
@@ -32,7 +32,7 @@ async function variantDiagnostic(query, indexDir, match) {
   const generated = await generateVariantCandidates(localSketch, (prefix) =>
     Promise.resolve(anchorCache.get(prefix) ?? {}));
   const preScoreEligible = generated.candidates.some((candidate) => candidate.variantId === expectedVariantId);
-  const sketchShard = await readSketchShard(indexDir, expectedVariantId.slice(0, 2));
+  const sketchShard = await readSketchShard(indexDir, variantSketchRoute(expectedVariantId).key);
   const expectedSketch = sketchShard[expectedVariantId]?.sketch;
   const expectedTargetAnchors = (expectedSketch ?? []).slice(0, DEFAULT_ANCHOR_COUNT);
   const theoreticalSharedAnchors = anchors.filter((anchor) => expectedTargetAnchors.includes(anchor)).length;
