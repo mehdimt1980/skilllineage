@@ -8,6 +8,7 @@ import {
   readManifest,
   readShard,
   readInstructionShard,
+  readSketchShard,
   lookupExact,
   lookupInstructions,
   shardPrefix,
@@ -17,11 +18,8 @@ import type {
   IndexManifest,
   IndexShard,
   InstructionShard,
+  SketchShard,
 } from "./types.js";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 let tempDirs: string[] = [];
 
@@ -35,7 +33,7 @@ function validManifest(
   overrides: Partial<Record<string, unknown>> = {},
 ): IndexManifest {
   return {
-    schemaVersion: "0.2",
+    schemaVersion: "0.3",
     kind: "skilllineage-exact-index",
     source: {
       name: "TestSkills",
@@ -64,6 +62,7 @@ function validManifest(
       anchorCount: 8,
       maxAnchorPostings: 2000,
       anchorShardRouting: "sha256-anchor-hex-v1",
+      sketchShardRouting: "variant-id-hex4-v1",
       skippedHotAnchorCount: 0,
     },
     ...overrides,
@@ -103,6 +102,18 @@ async function writeInstructionShard(
   await writeFile(path.join(instrDir, `${prefix}.json.gz`), gz);
 }
 
+async function writeSketchShard(
+  dir: string,
+  routeKey: string,
+  data: SketchShard,
+): Promise<void> {
+  const [first, second] = routeKey.split("/");
+  const sketchDir = path.join(dir, "variants", "sketches", first);
+  await mkdir(sketchDir, { recursive: true });
+  const gz = gzipSync(Buffer.from(JSON.stringify(data, null, 2), "utf-8"));
+  await writeFile(path.join(sketchDir, `${second}.json.gz`), gz);
+}
+
 beforeEach(() => {
   tempDirs = [];
 });
@@ -112,10 +123,6 @@ afterEach(async () => {
     await rm(d, { recursive: true, force: true });
   }
 });
-
-// ---------------------------------------------------------------------------
-// shardPrefix
-// ---------------------------------------------------------------------------
 
 describe("shardPrefix", () => {
   it("extracts first 2 hex characters", () => {
@@ -127,18 +134,12 @@ describe("shardPrefix", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// readManifest
-// ---------------------------------------------------------------------------
-
 describe("readManifest", () => {
-  it("reads a valid manifest", async () => {
+  it("reads a valid schema-0.3 manifest", async () => {
     const dir = await makeTempDir();
     const manifest = validManifest();
     await writeManifest(dir, manifest);
-
-    const result = await readManifest(dir);
-    expect(result).toEqual(manifest);
+    expect(await readManifest(dir)).toEqual(manifest);
   });
 
   it("fails when manifest is missing", async () => {
@@ -155,30 +156,20 @@ describe("readManifest", () => {
 
   it("fails on unsupported kind", async () => {
     const dir = await makeTempDir();
-    await writeManifest(dir, {
-      ...validManifest(),
-      kind: "something-else",
-    });
+    await writeManifest(dir, { ...validManifest(), kind: "something-else" });
     await expect(readManifest(dir)).rejects.toThrow("Unsupported index kind");
   });
 
-  it("fails on unsupported schema version", async () => {
+  it("rejects schema 0.2 with an explicit rebuild instruction", async () => {
     const dir = await makeTempDir();
-    await writeManifest(dir, {
-      ...validManifest(),
-      schemaVersion: "99.0",
-    });
-    await expect(readManifest(dir)).rejects.toThrow(
-      "Unsupported schema version",
-    );
+    await writeManifest(dir, { ...validManifest(), schemaVersion: "0.2" });
+    await expect(readManifest(dir)).rejects.toThrow("Unsupported schema version: 0.2");
+    await expect(readManifest(dir)).rejects.toThrow("Rebuild the index");
   });
 
   it("fails on invalid structure (array)", async () => {
     const dir = await makeTempDir();
-    await writeFile(
-      path.join(dir, "manifest.json"),
-      JSON.stringify([1, 2, 3]),
-    );
+    await writeFile(path.join(dir, "manifest.json"), JSON.stringify([1, 2, 3]));
     await expect(readManifest(dir)).rejects.toThrow("Invalid manifest");
   });
 
@@ -188,26 +179,23 @@ describe("readManifest", () => {
       ...validManifest(),
       variantIndex: { ...validManifest().variantIndex, sketchSize: 64 },
     });
-    await expect(readManifest(dir)).rejects.toThrow(
-      "Unsupported variant index parameters",
-    );
+    await expect(readManifest(dir)).rejects.toThrow("Unsupported variant index parameters");
   });
 
-  it("rejects old and missing anchor routing with a rebuild instruction", async () => {
+  it("rejects missing anchor or sketch routing with a rebuild instruction", async () => {
     const dir = await makeTempDir();
-    await writeManifest(dir, { ...validManifest(), schemaVersion: "0.1" });
-    await expect(readManifest(dir)).rejects.toThrow("Rebuild the index");
     await writeManifest(dir, {
       ...validManifest(),
       variantIndex: { ...validManifest().variantIndex, anchorShardRouting: undefined },
     });
     await expect(readManifest(dir)).rejects.toThrow("Rebuild the index");
+    await writeManifest(dir, {
+      ...validManifest(),
+      variantIndex: { ...validManifest().variantIndex, sketchShardRouting: undefined },
+    });
+    await expect(readManifest(dir)).rejects.toThrow("Rebuild the index");
   });
 });
-
-// ---------------------------------------------------------------------------
-// readShard (exact)
-// ---------------------------------------------------------------------------
 
 describe("readShard", () => {
   it("reads and decompresses a valid shard", async () => {
@@ -215,23 +203,19 @@ describe("readShard", () => {
     const shardData: IndexShard = {
       ab123: {
         copyCount: 1,
-        occurrences: [
-          {
-            repoFullName: "owner/repo",
-            path: "SKILL.md",
-            locationClass: "canonical",
-            stars: 10,
-            firstCommitAt: null,
-            lastCommitAt: null,
-            historyFetched: null,
-          },
-        ],
+        occurrences: [{
+          repoFullName: "owner/repo",
+          path: "SKILL.md",
+          locationClass: "canonical",
+          stars: 10,
+          firstCommitAt: null,
+          lastCommitAt: null,
+          historyFetched: null,
+        }],
       },
     };
     await writeExactShard(dir, "ab", shardData);
-
-    const result = await readShard(dir, "ab");
-    expect(result).toEqual(shardData);
+    expect(await readShard(dir, "ab")).toEqual(shardData);
   });
 
   it("fails when shard is missing", async () => {
@@ -244,18 +228,14 @@ describe("readShard", () => {
     const dir = await makeTempDir();
     const exactDir = path.join(dir, "exact");
     await mkdir(exactDir, { recursive: true });
-    await writeFile(
-      path.join(exactDir, "ab.json.gz"),
-      Buffer.from("not gzip data"),
-    );
+    await writeFile(path.join(exactDir, "ab.json.gz"), Buffer.from("not gzip data"));
     await expect(readShard(dir, "ab")).rejects.toThrow("Corrupt gzip");
   });
 
   it("empty shard {} is valid and returns empty object", async () => {
     const dir = await makeTempDir();
     await writeExactShard(dir, "00", {});
-    const result = await readShard(dir, "00");
-    expect(result).toEqual({});
+    expect(await readShard(dir, "00")).toEqual({});
   });
 });
 
@@ -275,56 +255,27 @@ describe("shard read profiling", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// lookupExact
-// ---------------------------------------------------------------------------
-
 describe("lookupExact", () => {
   it("finds an exact hash match", async () => {
     const dir = await makeTempDir();
     const hash = "ab12345678901234567890123456789012345678";
     await writeExactShard(dir, "ab", {
-      [hash]: {
-        copyCount: 1,
-        occurrences: [
-          {
-            repoFullName: "owner/repo",
-            path: "SKILL.md",
-            locationClass: null,
-            stars: 5,
-            firstCommitAt: null,
-            lastCommitAt: null,
-            historyFetched: null,
-          },
-        ],
-      },
+      [hash]: { copyCount: 1, occurrences: [{
+        repoFullName: "owner/repo", path: "SKILL.md", locationClass: null,
+        stars: 5, firstCommitAt: null, lastCommitAt: null, historyFetched: null,
+      }] },
     });
-
-    const result = await lookupExact(dir, hash);
-    expect(result).not.toBeNull();
-    expect(result?.copyCount).toBe(1);
+    expect((await lookupExact(dir, hash))?.copyCount).toBe(1);
   });
 
   it("returns null for unknown hash in existing shard", async () => {
     const dir = await makeTempDir();
     await writeExactShard(dir, "ab", {
-      ab00000000000000000000000000000000000000: {
-        copyCount: 1,
-        occurrences: [],
-      },
+      ab00000000000000000000000000000000000000: { copyCount: 1, occurrences: [] },
     });
-
-    const result = await lookupExact(
-      dir,
-      "ab99999999999999999999999999999999999999",
-    );
-    expect(result).toBeNull();
+    expect(await lookupExact(dir, "ab99999999999999999999999999999999999999")).toBeNull();
   });
 });
-
-// ---------------------------------------------------------------------------
-// readInstructionShard / lookupInstructions
-// ---------------------------------------------------------------------------
 
 describe("readInstructionShard", () => {
   it("reads a valid instruction shard", async () => {
@@ -335,32 +286,23 @@ describe("readInstructionShard", () => {
       ],
     };
     await writeInstructionShard(dir, "ba", data);
-
-    const result = await readInstructionShard(dir, "ba");
-    expect(result).toEqual(data);
+    expect(await readInstructionShard(dir, "ba")).toEqual(data);
   });
 
   it("empty instruction shard {} is valid", async () => {
     const dir = await makeTempDir();
     await writeInstructionShard(dir, "00", {});
-    const result = await readInstructionShard(dir, "00");
-    expect(result).toEqual({});
+    expect(await readInstructionShard(dir, "00")).toEqual({});
   });
 });
 
 describe("lookupInstructions", () => {
   it("returns blob hashes for known instruction hash", async () => {
     const dir = await makeTempDir();
-    const instrHash =
-      "ba882dcc1234567890abcdef1234567890abcdef1234567890abcdef12345678";
+    const instrHash = "ba882dcc1234567890abcdef1234567890abcdef1234567890abcdef12345678";
     const blobHash = "ab12345678901234567890123456789012345678";
-
-    await writeInstructionShard(dir, "ba", {
-      [instrHash]: [blobHash],
-    });
-
-    const result = await lookupInstructions(dir, instrHash);
-    expect(result).toEqual([blobHash]);
+    await writeInstructionShard(dir, "ba", { [instrHash]: [blobHash] });
+    expect(await lookupInstructions(dir, instrHash)).toEqual([blobHash]);
   });
 
   it("returns null for unknown instruction hash in existing shard", async () => {
@@ -368,10 +310,40 @@ describe("lookupInstructions", () => {
     await writeInstructionShard(dir, "ba", {
       ba00000000000000000000000000000000000000000000000000000000000000: [],
     });
-    const result = await lookupInstructions(
-      dir,
-      "ba99999999999999999999999999999999999999999999999999999999999999",
-    );
-    expect(result).toBeNull();
+    expect(await lookupInstructions(dir, "ba99999999999999999999999999999999999999999999999999999999999999")).toBeNull();
+  });
+});
+
+describe("readSketchShard", () => {
+  it("reads a nested schema-0.3 micro-shard and reports its stable route key", async () => {
+    const dir = await makeTempDir();
+    const variantId = "a1b2" + "0".repeat(20);
+    const data: SketchShard = {
+      [variantId]: { instructionsSha256: "f".repeat(64), sketch: ["01", "02"] },
+    };
+    await writeSketchShard(dir, "a1/b2", data);
+    const events: import("./reader.js").ShardReadEvent[] = [];
+    expect(await readSketchShard(dir, "A1/B2", (event) => events.push(event))).toEqual(data);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ shardKind: "variant_sketch", prefix: "a1/b2" });
+  });
+
+  it("treats a missing sketch micro-shard as empty without weakening exact reads", async () => {
+    const dir = await makeTempDir();
+    expect(await readSketchShard(dir, "a1/b2")).toEqual({});
+    await expect(readShard(dir, "a1")).rejects.toThrow("Shard not found");
+  });
+
+  it("fails for a malformed existing sketch micro-shard", async () => {
+    const dir = await makeTempDir();
+    const sketchDir = path.join(dir, "variants", "sketches", "a1");
+    await mkdir(sketchDir, { recursive: true });
+    await writeFile(path.join(sketchDir, "b2.json.gz"), Buffer.from("not gzip data"));
+    await expect(readSketchShard(dir, "a1/b2")).rejects.toThrow("Corrupt gzip");
+  });
+
+  it("rejects unsafe or malformed sketch routes", async () => {
+    const dir = await makeTempDir();
+    await expect(readSketchShard(dir, "../../etc")).rejects.toThrow("Invalid variant sketch route");
   });
 });
