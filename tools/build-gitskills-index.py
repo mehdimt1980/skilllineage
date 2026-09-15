@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -55,7 +56,6 @@ ALL_PREFIXES = [f"{i:02x}" for i in range(256)]
 # Must exactly reproduce SkillLineage TypeScript normalizeInstructions().
 # Inspect src/fingerprint/fingerprint.ts for the canonical implementation.
 # ---------------------------------------------------------------------------
-
 def normalize_instructions(raw: str) -> str:
     """
     Normalize SKILL.md content to its canonical instruction body.
@@ -146,7 +146,6 @@ def instruction_sketch(normalized: str):
 # ---------------------------------------------------------------------------
 # Deterministic gzip
 # ---------------------------------------------------------------------------
-
 def write_gz_shard(shard_path: Path, data: dict) -> None:
     """Write data as deterministic gzipped JSON (mtime=0)."""
     shard_path.parent.mkdir(parents=True, exist_ok=True)
@@ -167,7 +166,6 @@ def write_gz_shard(shard_path: Path, data: dict) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-
 def main():
     parser = argparse.ArgumentParser(
         description="Build a SkillLineage dual index from GitSkills."
@@ -201,6 +199,13 @@ def main():
     instructions_dir = out_dir / "instructions"
     sketches_dir = out_dir / "variants" / "sketches"
     anchors_dir = out_dir / "variants" / "anchors"
+
+    # Sketch schema 0.3 is sparse. Clear the sketch namespace so a rebuild into
+    # an existing output directory cannot retain obsolete schema-0.2 flat
+    # shards or stale schema-0.3 micro-shards from a previous dataset.
+    if sketches_dir.exists():
+        shutil.rmtree(sketches_dir)
+
     exact_dir.mkdir(parents=True, exist_ok=True)
     instructions_dir.mkdir(parents=True, exist_ok=True)
     sketches_dir.mkdir(parents=True, exist_ok=True)
@@ -277,7 +282,6 @@ def main():
 # ---------------------------------------------------------------------------
 # Exact index — all 256 shards
 # ---------------------------------------------------------------------------
-
 def build_exact_index(conn, exact_dir: Path):
     query = """
         SELECT
@@ -392,7 +396,6 @@ def _finalize_exact_shard(shard_data: dict) -> None:
 # ---------------------------------------------------------------------------
 # Instruction index — streaming via temp SQLite, all 256 shards
 # ---------------------------------------------------------------------------
-
 def build_instruction_index(
     conn, instructions_dir: Path, sketches_dir: Path, anchors_dir: Path,
     tmp_db_path: str
