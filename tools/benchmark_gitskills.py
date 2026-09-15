@@ -64,6 +64,7 @@ def normalized_instruction_sha256(content: str) -> str:
 
 def exact_ground_truth_jaccard(original: str, mutated: str) -> float:
     """Mirror TypeScript's normalized, exact 5-token shingle-set Jaccard."""
+
     def shingles(content):
         tokens = _builder.tokenize_instructions(_builder.normalize_instructions(content))
         if not tokens:
@@ -268,8 +269,10 @@ def miss_reason(diagnostic):
 
 def variant_quality(results):
     eligible = [item for item in results if item["groundTruthJaccard"] >= 0.70]
+
     def recalls(items):
         return {"count": len(items), **{f"recallAt{rank}": recall_at(items, rank) for rank in (1, 3, 10)}}
+
     reasons = {}
     ranks = {"rank1Count": 0, "rank2to3Count": 0, "rank4to10Count": 0, "missingCount": 0}
     for item in results:
@@ -306,9 +309,82 @@ def details_report(results, identifiers):
             "path": sample["path"],
             "expectedInstructionsSha256": item["expectedInstructionsSha256"],
             "groundTruthJaccard": item["groundTruthJaccard"],
-            **item["diagnostic"], "missReason": miss_reason(item["diagnostic"]),
+            **item["diagnostic"], "profiling": item.get("profiling", {}), "missReason": miss_reason(item["diagnostic"]),
         })
-    return {"schemaVersion": "0.1", "queries": details}
+    return {"schemaVersion": "0.2", "queries": details}
+
+
+def _optional_diagnostic(item):
+    diagnostic = item.get("diagnostic")
+    return diagnostic if isinstance(diagnostic, dict) else {}
+
+
+def profiling_summary(results):
+    stages = {}
+    for item in results:
+        for name, value in item.get("profiling", {}).get("stages", {}).items():
+            stages.setdefault(name, []).append(value)
+    reads = [event for item in results for event in item.get("profiling", {}).get("shardReads", [])]
+    io = {}
+    for kind in ("variant_anchor", "variant_sketch", "instructions", "exact"):
+        selected = [event for event in reads if event["shardKind"] == kind]
+        io[kind] = {
+            "shardReads": len(selected),
+            "compressedBytes": sum(event["compressedBytes"] for event in selected),
+            "decompressedBytes": sum(event["decompressedBytes"] for event in selected),
+        }
+    counts = {}
+    for item in results:
+        for name, value in item.get("profiling", {}).get("counts", {}).items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                counts.setdefault(name, []).append(value)
+    hot = [_optional_diagnostic(item).get("omittedSharedAnchorCount", 0) for item in results]
+    return {
+        "traceStagesMs": {name: latency_summary(values) for name, values in sorted(stages.items())},
+        "candidateGeneration": {name: latency_summary(values) for name, values in sorted(counts.items())},
+        "io": io,
+        "hotAnchors": {
+            "queriesWithOmittedSharedAnchors": sum(value > 0 for value in hot),
+            "meanOmittedSharedAnchors": statistics.fmean(hot) if hot else 0,
+            "maxOmittedSharedAnchors": max(hot, default=0),
+            "eligibleMissesWithOmittedSharedAnchors": sum(
+                item.get("groundTruthJaccard", 0) >= .70
+                and _optional_diagnostic(item).get("finalRank") is None
+                and _optional_diagnostic(item).get("omittedSharedAnchorCount", 0) > 0
+                for item in results
+            ),
+            "eligibleHitsWithOmittedSharedAnchors": sum(
+                item.get("groundTruthJaccard", 0) >= .70
+                and _optional_diagnostic(item).get("finalRank") is not None
+                and _optional_diagnostic(item).get("omittedSharedAnchorCount", 0) > 0
+                for item in results
+            ),
+        },
+    }
+
+
+def slow_queries(results):
+    rows = sorted(results, key=lambda item: (-item["durationMs"], item["id"]))[:10]
+    return [
+        {
+            "id": item["id"],
+            "durationMs": item["durationMs"],
+            "groundTruthJaccard": item.get("groundTruthJaccard"),
+            "finalRank": _optional_diagnostic(item).get("finalRank"),
+            "missReason": miss_reason(item["diagnostic"]) if item.get("diagnostic") else None,
+            "counts": item.get("profiling", {}).get("counts", {}),
+            "stages": item.get("profiling", {}).get("stages", {}),
+            "shardReads": len(item.get("profiling", {}).get("shardReads", [])),
+            "compressedBytes": sum(
+                event["compressedBytes"] for event in item.get("profiling", {}).get("shardReads", [])
+            ),
+            "decompressedBytes": sum(
+                event["decompressedBytes"] for event in item.get("profiling", {}).get("shardReads", [])
+            ),
+            "omittedSharedAnchorCount": _optional_diagnostic(item).get("omittedSharedAnchorCount"),
+        }
+        for item in rows
+    ]
 
 
 def index_size_metrics(index_dir: Path):
@@ -367,8 +443,15 @@ def run_trace_worker(node: str, payload_path: Path):
     return json.loads(completed.stdout)
 
 
-def build_report(db_path: Path, index_dir: Path, samples: int, seed: int, keep_temp: bool, node: str,
-                 details_output: Path | None = None):
+def build_report(
+    db_path: Path,
+    index_dir: Path,
+    samples: int,
+    seed: int,
+    keep_temp: bool,
+    node: str,
+    details_output: Path | None = None,
+):
     validate_inputs(db_path, index_dir)
     chosen = sample_representatives(db_path, samples, seed)
     if not chosen:
@@ -391,9 +474,11 @@ def build_report(db_path: Path, index_dir: Path, samples: int, seed: int, keep_t
             for name in ("exact", "same_instructions", "variant_light", "variant_medium", "none")
         }
         exact_hits = sum(item["match"].get("type") == "exact" for item in by_category["exact"])
-        same_hits = sum(item["match"].get("type") == "same_instructions" for item in by_category["same_instructions"])
+        same_hits = sum(
+            item["match"].get("type") == "same_instructions" for item in by_category["same_instructions"]
+        )
         report = {
-            "schemaVersion": "0.1",
+            "schemaVersion": "0.2",
             "environment": {
                 "node": worker["environment"]["node"],
                 "python": platform.python_version(),
@@ -423,10 +508,26 @@ def build_report(db_path: Path, index_dir: Path, samples: int, seed: int, keep_t
             },
             "latencyMs": {
                 "exact": latency_summary([item["durationMs"] for item in by_category["exact"]]),
-                "sameInstructions": latency_summary([item["durationMs"] for item in by_category["same_instructions"]]),
-                "variantLight": latency_summary([item["durationMs"] for item in by_category["variant_light"]]),
-                "variantMedium": latency_summary([item["durationMs"] for item in by_category["variant_medium"]]),
+                "sameInstructions": latency_summary(
+                    [item["durationMs"] for item in by_category["same_instructions"]]
+                ),
+                "variantLight": latency_summary(
+                    [item["durationMs"] for item in by_category["variant_light"]]
+                ),
+                "variantMedium": latency_summary(
+                    [item["durationMs"] for item in by_category["variant_medium"]]
+                ),
                 "none": latency_summary([item["durationMs"] for item in by_category["none"]]),
+            },
+            "profiling": {
+                "variantLight": profiling_summary(by_category["variant_light"]),
+                "variantMedium": profiling_summary(by_category["variant_medium"]),
+                "none": profiling_summary(by_category["none"]),
+            },
+            "slowQueries": {
+                "variantLight": slow_queries(by_category["variant_light"]),
+                "variantMedium": slow_queries(by_category["variant_medium"]),
+                "none": slow_queries(by_category["none"]),
             },
         }
         if keep_temp:
@@ -445,7 +546,9 @@ def write_report(report, output_path: Path):
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="Benchmark SkillLineage on a local GitSkills-derived index")
+    parser = argparse.ArgumentParser(
+        description="Benchmark SkillLineage on a local GitSkills-derived index"
+    )
     parser.add_argument("--db", required=True, type=Path, help="Local GitSkills SQLite database")
     parser.add_argument("--index", required=True, type=Path, help="Generated SkillLineage index directory")
     parser.add_argument("--samples", type=int, default=100)
@@ -461,7 +564,12 @@ def main(argv=None):
     args = parse_args(argv)
     try:
         report = build_report(
-            args.db, args.index, args.samples, args.seed, args.keep_temp, args.node,
+            args.db,
+            args.index,
+            args.samples,
+            args.seed,
+            args.keep_temp,
+            args.node,
             args.details_output,
         )
         write_report(report, args.output)

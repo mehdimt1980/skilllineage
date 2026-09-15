@@ -259,6 +259,22 @@ describe("readShard", () => {
   });
 });
 
+describe("shard read profiling", () => {
+  it("observes bytes and non-negative timings without changing parsed data", async () => {
+    const dir = await makeTempDir();
+    await writeExactShard(dir, "ab", { abcd: { copyCount: 0, occurrences: [] } });
+    const events: import("./reader.js").ShardReadEvent[] = [];
+    expect(await readShard(dir, "ab", (event) => events.push(event))).toEqual(await readShard(dir, "ab"));
+    expect(events).toHaveLength(1);
+    expect(events[0].shardKind).toBe("exact");
+    expect(events[0].compressedBytes).toBeGreaterThan(0);
+    expect(events[0].decompressedBytes).toBeGreaterThan(0);
+    expect(events[0].readMs).toBeGreaterThanOrEqual(0);
+    expect(events[0].gunzipMs).toBeGreaterThanOrEqual(0);
+    expect(events[0].parseMs).toBeGreaterThanOrEqual(0);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // lookupExact
 // ---------------------------------------------------------------------------

@@ -64,4 +64,6 @@ export type {
   VariantCandidate,
   VariantCandidateExample,
   NoneMatch,
+  TraceProfiling,
+  TraceProfilingOptions,
 } from "./trace/index.js";

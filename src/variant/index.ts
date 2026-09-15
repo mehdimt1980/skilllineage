@@ -21,4 +21,6 @@ export type {
   CandidateGenerationResult,
   PreScoreCandidate,
   ScoredCandidate,
+  CandidateGenerationDiagnostics,
+  ScoringDiagnostics,
 } from "./lookup.js";

@@ -35,6 +35,24 @@ describe("variant candidate generation", () => {
     expect(result.candidates).toEqual([]);
   });
 
+  it("reports candidate and scoring diagnostic counts", async () => {
+    const generation = { observedCandidateCount: 0, eligibleCandidateCount: 0, returnedCandidateCount: 0, uniqueAnchorShardCount: 0 };
+    const anchorA = "aa00";
+    const anchorB = "bb00";
+    const generated = await generateVariantCandidates([anchorA, anchorB], (prefix) => Promise.resolve({
+      ...(prefix === anchorShardPrefix(anchorA) ? { [anchorA]: ["cc".repeat(12)] } : {}),
+      ...(prefix === anchorShardPrefix(anchorB) ? { [anchorB]: ["cc".repeat(12)] } : {}),
+    }), generation);
+    expect(generation.observedCandidateCount).toBe(1);
+    expect(generation.eligibleCandidateCount).toBe(1);
+    const scoring = { inputCandidateCount: 0, uniqueSketchShardCount: 0, sketchRecordsFound: 0, passedEstimatedThresholdCount: 0, finalCandidateCount: 0 };
+    await scoreVariantCandidates([anchorA, anchorB], generated.candidates, () => Promise.resolve({ ["cc".repeat(12)]: { instructionsSha256: "d".repeat(64), sketch: [anchorA, anchorB] } }), scoring);
+    expect(scoring.inputCandidateCount).toBe(1);
+    expect(scoring.uniqueSketchShardCount).toBe(1);
+    expect(scoring.sketchRecordsFound).toBe(1);
+    expect(scoring.passedEstimatedThresholdCount).toBe(1);
+  });
+
   it("caps pre-score candidates at 2000 and reports truncation", async () => {
     const postings = Array.from({ length: 2001 }, (_, i) =>
       i.toString(16).padStart(24, "0"),

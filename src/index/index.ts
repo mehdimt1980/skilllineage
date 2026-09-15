@@ -9,6 +9,7 @@ export {
   shardPrefix,
   IndexError,
 } from "./reader.js";
+export type { ShardKind, ShardReadEvent, ShardReadObserver } from "./reader.js";
 export type {
   IndexManifest,
   IndexSource,

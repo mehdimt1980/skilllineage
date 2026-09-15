@@ -34,6 +34,8 @@ async function variantDiagnostic(query, indexDir, match) {
   const preScoreEligible = generated.candidates.some((candidate) => candidate.variantId === expectedVariantId);
   const sketchShard = await readSketchShard(indexDir, expectedVariantId.slice(0, 2));
   const expectedSketch = sketchShard[expectedVariantId]?.sketch;
+  const expectedTargetAnchors = (expectedSketch ?? []).slice(0, DEFAULT_ANCHOR_COUNT);
+  const theoreticalSharedAnchors = anchors.filter((anchor) => expectedTargetAnchors.includes(anchor)).length;
   const estimatedSketchSimilarity = expectedSketch
     ? estimateSketchSimilarity(localSketch, expectedSketch) : null;
   const finalRank = match.type === "variant_candidates"
@@ -42,7 +44,10 @@ async function variantDiagnostic(query, indexDir, match) {
   return {
     expectedVariantId,
     localAnchorCount: anchors.length,
+    expectedTargetAnchorCount: expectedTargetAnchors.length,
+    theoreticalSharedAnchors,
     expectedSharedAnchorPostings,
+    omittedSharedAnchorCount: theoreticalSharedAnchors - expectedSharedAnchorPostings,
     preScoreEligible,
     candidateGenerationTruncated: generated.truncated,
     estimatedSketchSimilarity,
@@ -60,8 +65,9 @@ if (!payloadPath) {
   const payload = JSON.parse(await readFile(payloadPath, "utf-8"));
   const results = [];
   for (const query of payload.queries) {
+    const profiling = { stages: {}, counts: {}, shardReads: [] };
     const started = performance.now();
-    const report = await traceSkill(query.skillPath, payload.indexDir, "benchmark");
+    const report = await traceSkill(query.skillPath, payload.indexDir, "benchmark", { profile: profiling });
     const durationMs = performance.now() - started;
     const diagnostic = query.category.startsWith("variant_")
       ? await variantDiagnostic(query, payload.indexDir, report.match) : null;
@@ -72,6 +78,7 @@ if (!payloadPath) {
       durationMs,
       match: report.match,
       diagnostic,
+      profiling,
     });
   }
   process.stdout.write(JSON.stringify({

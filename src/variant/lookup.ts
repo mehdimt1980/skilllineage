@@ -16,6 +16,21 @@ export interface CandidateGenerationResult {
   readonly truncated: boolean;
 }
 
+export interface CandidateGenerationDiagnostics {
+  observedCandidateCount: number;
+  eligibleCandidateCount: number;
+  returnedCandidateCount: number;
+  uniqueAnchorShardCount: number;
+}
+
+export interface ScoringDiagnostics {
+  inputCandidateCount: number;
+  uniqueSketchShardCount: number;
+  sketchRecordsFound: number;
+  passedEstimatedThresholdCount: number;
+  finalCandidateCount: number;
+}
+
 export interface ScoredCandidate extends PreScoreCandidate {
   readonly instructionsSha256: string;
   readonly estimatedSimilarity: number;
@@ -24,6 +39,7 @@ export interface ScoredCandidate extends PreScoreCandidate {
 export async function generateVariantCandidates(
   localSketch: readonly string[],
   readAnchorShard: (prefix: string) => Promise<AnchorShard>,
+  diagnostics?: CandidateGenerationDiagnostics,
 ): Promise<CandidateGenerationResult> {
   const anchors = localSketch.slice(0, DEFAULT_ANCHOR_COUNT);
   const byPrefix = new Map<string, string[]>();
@@ -53,16 +69,28 @@ export async function generateVariantCandidates(
         compareStrings(a.variantId, b.variantId),
     );
 
-  return {
+  const result = {
     candidates: eligible.slice(0, MAX_PRE_SCORE_CANDIDATES),
     truncated: eligible.length > MAX_PRE_SCORE_CANDIDATES,
   };
+
+  if (diagnostics) {
+    Object.assign(diagnostics, {
+      observedCandidateCount: counts.size,
+      eligibleCandidateCount: eligible.length,
+      returnedCandidateCount: result.candidates.length,
+      uniqueAnchorShardCount: byPrefix.size,
+    });
+  }
+
+  return result;
 }
 
 export async function scoreVariantCandidates(
   localSketch: readonly string[],
   candidates: readonly PreScoreCandidate[],
   readSketchShard: (prefix: string) => Promise<SketchShard>,
+  diagnostics?: ScoringDiagnostics,
 ): Promise<ScoredCandidate[]> {
   const byPrefix = new Map<string, PreScoreCandidate[]>();
   for (const candidate of candidates) {
@@ -73,10 +101,12 @@ export async function scoreVariantCandidates(
   }
 
   const scored: ScoredCandidate[] = [];
+  let found = 0;
   for (const [prefix, groupedCandidates] of byPrefix) {
     const shard = await readSketchShard(prefix);
     for (const candidate of groupedCandidates) {
       if (!Object.prototype.hasOwnProperty.call(shard, candidate.variantId)) continue;
+      found++;
       const record = shard[candidate.variantId];
       const estimatedSimilarity = estimateSketchSimilarity(
         localSketch,
@@ -92,7 +122,7 @@ export async function scoreVariantCandidates(
     }
   }
 
-  return scored
+  const result = scored
     .sort(
       (a, b) =>
         b.estimatedSimilarity - a.estimatedSimilarity ||
@@ -100,6 +130,18 @@ export async function scoreVariantCandidates(
         compareStrings(a.instructionsSha256, b.instructionsSha256),
     )
     .slice(0, MAX_FINAL_CANDIDATES);
+
+  if (diagnostics) {
+    Object.assign(diagnostics, {
+      inputCandidateCount: candidates.length,
+      uniqueSketchShardCount: byPrefix.size,
+      sketchRecordsFound: found,
+      passedEstimatedThresholdCount: scored.length,
+      finalCandidateCount: result.length,
+    });
+  }
+
+  return result;
 }
 
 function compareStrings(a: string, b: string): number {
