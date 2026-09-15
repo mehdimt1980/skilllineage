@@ -251,6 +251,28 @@ class BenchmarkToolingTests(unittest.TestCase):
         self.assertEqual(summary["hotAnchors"]["queriesWithOmittedSharedAnchors"], 3)
         self.assertEqual([row["id"] for row in benchmark.slow_queries(rows)], ["a", "b", "c"])
 
+    def test_none_query_profiling_accepts_null_diagnostic(self):
+        item = {
+            "id": "0:none",
+            "category": "none",
+            "durationMs": 12.5,
+            "diagnostic": None,
+            "profiling": {
+                "stages": {"totalTraceMs": 12.5},
+                "counts": {},
+                "shardReads": [],
+            },
+        }
+        summary = benchmark.profiling_summary([item])
+        self.assertEqual(summary["hotAnchors"]["queriesWithOmittedSharedAnchors"], 0)
+        self.assertEqual(summary["hotAnchors"]["meanOmittedSharedAnchors"], 0)
+        self.assertEqual(summary["hotAnchors"]["maxOmittedSharedAnchors"], 0)
+        slow = benchmark.slow_queries([item])
+        self.assertEqual(len(slow), 1)
+        self.assertIsNone(slow[0]["finalRank"])
+        self.assertIsNone(slow[0]["missReason"])
+        self.assertIsNone(slow[0]["omittedSharedAnchorCount"])
+
     def test_benchmark_json_serialization(self):
         output = self.root / "nested" / "report.json"
         benchmark.write_report({"schemaVersion": "0.1", "value": 3}, output)
