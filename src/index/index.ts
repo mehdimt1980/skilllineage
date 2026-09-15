@@ -9,6 +9,11 @@ export {
   shardPrefix,
   IndexError,
 } from "./reader.js";
+export {
+  VARIANT_SKETCH_SHARD_ROUTING,
+  variantSketchRoute,
+} from "./routing.js";
+export type { VariantSketchRoute } from "./routing.js";
 export type { ShardKind, ShardReadEvent, ShardReadObserver } from "./reader.js";
 export type {
   IndexManifest,
