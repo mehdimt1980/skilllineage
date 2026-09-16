@@ -18,7 +18,6 @@ import {
 import type {
   IndexOccurrence,
   IndexHashEntry,
-  IndexShard,
   VariantEnrichmentRecord,
 } from "../index/types.js";
 import {
