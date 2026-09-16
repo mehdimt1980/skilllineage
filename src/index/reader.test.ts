@@ -9,6 +9,7 @@ import {
   readShard,
   readInstructionShard,
   readSketchShard,
+  readVariantEnrichmentShard,
   lookupExact,
   lookupInstructions,
   shardPrefix,
@@ -19,6 +20,7 @@ import type {
   IndexShard,
   InstructionShard,
   SketchShard,
+  VariantEnrichmentShard,
 } from "./types.js";
 
 let tempDirs: string[] = [];
@@ -33,7 +35,7 @@ function validManifest(
   overrides: Partial<Record<string, unknown>> = {},
 ): IndexManifest {
   return {
-    schemaVersion: "0.3",
+    schemaVersion: "0.4",
     kind: "skilllineage-exact-index",
     source: {
       name: "TestSkills",
@@ -63,6 +65,11 @@ function validManifest(
       maxAnchorPostings: 2000,
       anchorShardRouting: "sha256-anchor-hex-v1",
       sketchShardRouting: "variant-id-hex4-v1",
+      enrichment: {
+        algorithm: "precomputed-variant-summary-v1",
+        shardRouting: "instructions-sha256-hex4-v1",
+        exampleLimit: 3,
+      },
       skippedHotAnchorCount: 0,
     },
     ...overrides,
@@ -114,6 +121,18 @@ async function writeSketchShard(
   await writeFile(path.join(sketchDir, `${second}.json.gz`), gz);
 }
 
+async function writeEnrichmentShard(
+  dir: string,
+  routeKey: string,
+  data: VariantEnrichmentShard,
+): Promise<void> {
+  const [first, second] = routeKey.split("/");
+  const enrichmentDir = path.join(dir, "variants", "enrichment", first);
+  await mkdir(enrichmentDir, { recursive: true });
+  const gz = gzipSync(Buffer.from(JSON.stringify(data, null, 2), "utf-8"));
+  await writeFile(path.join(enrichmentDir, `${second}.json.gz`), gz);
+}
+
 beforeEach(() => {
   tempDirs = [];
 });
@@ -135,7 +154,7 @@ describe("shardPrefix", () => {
 });
 
 describe("readManifest", () => {
-  it("reads a valid schema-0.3 manifest", async () => {
+  it("reads a valid schema-0.4 manifest", async () => {
     const dir = await makeTempDir();
     const manifest = validManifest();
     await writeManifest(dir, manifest);
@@ -160,10 +179,12 @@ describe("readManifest", () => {
     await expect(readManifest(dir)).rejects.toThrow("Unsupported index kind");
   });
 
-  it("rejects schema 0.2 with an explicit rebuild instruction", async () => {
+  it("rejects schema 0.3 with an explicit rebuild instruction", async () => {
     const dir = await makeTempDir();
-    await writeManifest(dir, { ...validManifest(), schemaVersion: "0.2" });
-    await expect(readManifest(dir)).rejects.toThrow("Unsupported schema version: 0.2");
+    await writeManifest(dir, { ...validManifest(), schemaVersion: "0.3" });
+    await expect(readManifest(dir)).rejects.toThrow(
+      "Unsupported schema version: 0.3",
+    );
     await expect(readManifest(dir)).rejects.toThrow("Rebuild the index");
   });
 
@@ -179,19 +200,32 @@ describe("readManifest", () => {
       ...validManifest(),
       variantIndex: { ...validManifest().variantIndex, sketchSize: 64 },
     });
-    await expect(readManifest(dir)).rejects.toThrow("Unsupported variant index parameters");
+    await expect(readManifest(dir)).rejects.toThrow(
+      "Unsupported variant index parameters",
+    );
   });
 
-  it("rejects missing anchor or sketch routing with a rebuild instruction", async () => {
+  it("requires anchor, sketch, and enrichment routing declarations", async () => {
     const dir = await makeTempDir();
     await writeManifest(dir, {
       ...validManifest(),
-      variantIndex: { ...validManifest().variantIndex, anchorShardRouting: undefined },
+      variantIndex: {
+        ...validManifest().variantIndex,
+        anchorShardRouting: undefined,
+      },
     });
     await expect(readManifest(dir)).rejects.toThrow("Rebuild the index");
     await writeManifest(dir, {
       ...validManifest(),
-      variantIndex: { ...validManifest().variantIndex, sketchShardRouting: undefined },
+      variantIndex: {
+        ...validManifest().variantIndex,
+        sketchShardRouting: undefined,
+      },
+    });
+    await expect(readManifest(dir)).rejects.toThrow("Rebuild the index");
+    await writeManifest(dir, {
+      ...validManifest(),
+      variantIndex: { ...validManifest().variantIndex, enrichment: undefined },
     });
     await expect(readManifest(dir)).rejects.toThrow("Rebuild the index");
   });
@@ -203,15 +237,17 @@ describe("readShard", () => {
     const shardData: IndexShard = {
       ab123: {
         copyCount: 1,
-        occurrences: [{
-          repoFullName: "owner/repo",
-          path: "SKILL.md",
-          locationClass: "canonical",
-          stars: 10,
-          firstCommitAt: null,
-          lastCommitAt: null,
-          historyFetched: null,
-        }],
+        occurrences: [
+          {
+            repoFullName: "owner/repo",
+            path: "SKILL.md",
+            locationClass: "canonical",
+            stars: 10,
+            firstCommitAt: null,
+            lastCommitAt: null,
+            historyFetched: null,
+          },
+        ],
       },
     };
     await writeExactShard(dir, "ab", shardData);
@@ -228,7 +264,10 @@ describe("readShard", () => {
     const dir = await makeTempDir();
     const exactDir = path.join(dir, "exact");
     await mkdir(exactDir, { recursive: true });
-    await writeFile(path.join(exactDir, "ab.json.gz"), Buffer.from("not gzip data"));
+    await writeFile(
+      path.join(exactDir, "ab.json.gz"),
+      Buffer.from("not gzip data"),
+    );
     await expect(readShard(dir, "ab")).rejects.toThrow("Corrupt gzip");
   });
 
@@ -242,9 +281,13 @@ describe("readShard", () => {
 describe("shard read profiling", () => {
   it("observes bytes and non-negative timings without changing parsed data", async () => {
     const dir = await makeTempDir();
-    await writeExactShard(dir, "ab", { abcd: { copyCount: 0, occurrences: [] } });
+    await writeExactShard(dir, "ab", {
+      abcd: { copyCount: 0, occurrences: [] },
+    });
     const events: import("./reader.js").ShardReadEvent[] = [];
-    expect(await readShard(dir, "ab", (event) => events.push(event))).toEqual(await readShard(dir, "ab"));
+    expect(
+      await readShard(dir, "ab", (event) => events.push(event)),
+    ).toEqual(await readShard(dir, "ab"));
     expect(events).toHaveLength(1);
     expect(events[0].shardKind).toBe("exact");
     expect(events[0].compressedBytes).toBeGreaterThan(0);
@@ -260,10 +303,20 @@ describe("lookupExact", () => {
     const dir = await makeTempDir();
     const hash = "ab12345678901234567890123456789012345678";
     await writeExactShard(dir, "ab", {
-      [hash]: { copyCount: 1, occurrences: [{
-        repoFullName: "owner/repo", path: "SKILL.md", locationClass: null,
-        stars: 5, firstCommitAt: null, lastCommitAt: null, historyFetched: null,
-      }] },
+      [hash]: {
+        copyCount: 1,
+        occurrences: [
+          {
+            repoFullName: "owner/repo",
+            path: "SKILL.md",
+            locationClass: null,
+            stars: 5,
+            firstCommitAt: null,
+            lastCommitAt: null,
+            historyFetched: null,
+          },
+        ],
+      },
     });
     expect((await lookupExact(dir, hash))?.copyCount).toBe(1);
   });
@@ -271,9 +324,14 @@ describe("lookupExact", () => {
   it("returns null for unknown hash in existing shard", async () => {
     const dir = await makeTempDir();
     await writeExactShard(dir, "ab", {
-      ab00000000000000000000000000000000000000: { copyCount: 1, occurrences: [] },
+      ab00000000000000000000000000000000000000: {
+        copyCount: 1,
+        occurrences: [],
+      },
     });
-    expect(await lookupExact(dir, "ab99999999999999999999999999999999999999")).toBeNull();
+    expect(
+      await lookupExact(dir, "ab99999999999999999999999999999999999999"),
+    ).toBeNull();
   });
 });
 
@@ -299,7 +357,8 @@ describe("readInstructionShard", () => {
 describe("lookupInstructions", () => {
   it("returns blob hashes for known instruction hash", async () => {
     const dir = await makeTempDir();
-    const instrHash = "ba882dcc1234567890abcdef1234567890abcdef1234567890abcdef12345678";
+    const instrHash =
+      "ba882dcc1234567890abcdef1234567890abcdef1234567890abcdef12345678";
     const blobHash = "ab12345678901234567890123456789012345678";
     await writeInstructionShard(dir, "ba", { [instrHash]: [blobHash] });
     expect(await lookupInstructions(dir, instrHash)).toEqual([blobHash]);
@@ -310,22 +369,35 @@ describe("lookupInstructions", () => {
     await writeInstructionShard(dir, "ba", {
       ba00000000000000000000000000000000000000000000000000000000000000: [],
     });
-    expect(await lookupInstructions(dir, "ba99999999999999999999999999999999999999999999999999999999999999")).toBeNull();
+    expect(
+      await lookupInstructions(
+        dir,
+        "ba99999999999999999999999999999999999999999999999999999999999999",
+      ),
+    ).toBeNull();
   });
 });
 
 describe("readSketchShard", () => {
-  it("reads a nested schema-0.3 micro-shard and reports its stable route key", async () => {
+  it("reads a nested sketch micro-shard and reports its stable route key", async () => {
     const dir = await makeTempDir();
     const variantId = "a1b2" + "0".repeat(20);
     const data: SketchShard = {
-      [variantId]: { instructionsSha256: "f".repeat(64), sketch: ["01", "02"] },
+      [variantId]: {
+        instructionsSha256: "f".repeat(64),
+        sketch: ["01", "02"],
+      },
     };
     await writeSketchShard(dir, "a1/b2", data);
     const events: import("./reader.js").ShardReadEvent[] = [];
-    expect(await readSketchShard(dir, "A1/B2", (event) => events.push(event))).toEqual(data);
+    expect(
+      await readSketchShard(dir, "A1/B2", (event) => events.push(event)),
+    ).toEqual(data);
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ shardKind: "variant_sketch", prefix: "a1/b2" });
+    expect(events[0]).toMatchObject({
+      shardKind: "variant_sketch",
+      prefix: "a1/b2",
+    });
   });
 
   it("treats a missing sketch micro-shard as empty without weakening exact reads", async () => {
@@ -338,12 +410,107 @@ describe("readSketchShard", () => {
     const dir = await makeTempDir();
     const sketchDir = path.join(dir, "variants", "sketches", "a1");
     await mkdir(sketchDir, { recursive: true });
-    await writeFile(path.join(sketchDir, "b2.json.gz"), Buffer.from("not gzip data"));
-    await expect(readSketchShard(dir, "a1/b2")).rejects.toThrow("Corrupt gzip");
+    await writeFile(
+      path.join(sketchDir, "b2.json.gz"),
+      Buffer.from("not gzip data"),
+    );
+    await expect(readSketchShard(dir, "a1/b2")).rejects.toThrow(
+      "Corrupt gzip",
+    );
   });
 
   it("rejects unsafe or malformed sketch routes", async () => {
     const dir = await makeTempDir();
-    await expect(readSketchShard(dir, "../../etc")).rejects.toThrow("Invalid variant sketch route");
+    await expect(readSketchShard(dir, "../../etc")).rejects.toThrow(
+      "Invalid variant sketch route",
+    );
+  });
+});
+
+describe("readVariantEnrichmentShard", () => {
+  const hash = "a1b2" + "f".repeat(60);
+  const valid: VariantEnrichmentShard = {
+    [hash]: {
+      rawVariantCount: 2,
+      copyCount: 3,
+      examples: [
+        { repoFullName: "a/repo", path: "SKILL.md", stars: 10 },
+        { repoFullName: "b/repo", path: "SKILL.md", stars: null },
+      ],
+    },
+  };
+
+  it("reads and profiles a valid enrichment summary shard", async () => {
+    const dir = await makeTempDir();
+    await writeEnrichmentShard(dir, "a1/b2", valid);
+    const events: import("./reader.js").ShardReadEvent[] = [];
+    expect(
+      await readVariantEnrichmentShard(dir, "A1/B2", (event) =>
+        events.push(event),
+      ),
+    ).toEqual(valid);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      shardKind: "variant_enrichment",
+      prefix: "a1/b2",
+    });
+  });
+
+  it("treats a missing enrichment shard as index inconsistency", async () => {
+    const dir = await makeTempDir();
+    await expect(readVariantEnrichmentShard(dir, "a1/b2")).rejects.toThrow(
+      "Variant enrichment index is inconsistent",
+    );
+    await expect(readVariantEnrichmentShard(dir, "a1/b2")).rejects.toThrow(
+      "Rebuild the index",
+    );
+  });
+
+  it("rejects corrupt gzip and malformed JSON with rebuild guidance", async () => {
+    const dir = await makeTempDir();
+    const enrichmentDir = path.join(dir, "variants", "enrichment", "a1");
+    await mkdir(enrichmentDir, { recursive: true });
+    await writeFile(
+      path.join(enrichmentDir, "b2.json.gz"),
+      Buffer.from("not gzip data"),
+    );
+    await expect(readVariantEnrichmentShard(dir, "a1/b2")).rejects.toThrow(
+      "Rebuild the index",
+    );
+
+    await writeFile(
+      path.join(enrichmentDir, "b2.json.gz"),
+      gzipSync(Buffer.from("not-json", "utf-8")),
+    );
+    await expect(readVariantEnrichmentShard(dir, "a1/b2")).rejects.toThrow(
+      "Rebuild the index",
+    );
+  });
+
+  it("rejects structurally invalid summary records", async () => {
+    const dir = await makeTempDir();
+    const enrichmentDir = path.join(dir, "variants", "enrichment", "a1");
+    await mkdir(enrichmentDir, { recursive: true });
+    const invalid = {
+      [hash]: {
+        rawVariantCount: 0,
+        copyCount: 1,
+        examples: [],
+      },
+    };
+    await writeFile(
+      path.join(enrichmentDir, "b2.json.gz"),
+      gzipSync(Buffer.from(JSON.stringify(invalid), "utf-8")),
+    );
+    await expect(readVariantEnrichmentShard(dir, "a1/b2")).rejects.toThrow(
+      "invalid summary structure",
+    );
+  });
+
+  it("rejects unsafe or malformed enrichment routes", async () => {
+    const dir = await makeTempDir();
+    await expect(
+      readVariantEnrichmentShard(dir, "../../etc"),
+    ).rejects.toThrow("Invalid variant enrichment route");
   });
 });
