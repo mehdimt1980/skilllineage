@@ -10,8 +10,12 @@ import type {
   InstructionShard,
   SketchShard,
   AnchorShard,
+  VariantEnrichmentShard,
 } from "./types.js";
-import { VARIANT_SKETCH_SHARD_ROUTING } from "./routing.js";
+import {
+  VARIANT_ENRICHMENT_SHARD_ROUTING,
+  VARIANT_SKETCH_SHARD_ROUTING,
+} from "./routing.js";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -24,7 +28,12 @@ export class IndexError extends Error {
   }
 }
 
-export type ShardKind = "exact" | "instructions" | "variant_anchor" | "variant_sketch";
+export type ShardKind =
+  | "exact"
+  | "instructions"
+  | "variant_anchor"
+  | "variant_sketch"
+  | "variant_enrichment";
 export interface ShardReadEvent { shardKind: ShardKind; prefix: string; compressedBytes: number; decompressedBytes: number; readMs: number; gunzipMs: number; parseMs: number; totalMs: number; }
 export type ShardReadObserver = (event: ShardReadEvent) => void;
 
@@ -66,7 +75,7 @@ export async function readManifest(indexDir: string): Promise<IndexManifest> {
     );
   }
 
-  if (m.schemaVersion !== "0.3") {
+  if (m.schemaVersion !== "0.4") {
     throw new IndexError(
       `Unsupported schema version: ${String(m.schemaVersion)}. Rebuild the index with the current builder.`,
     );
@@ -103,6 +112,9 @@ export async function readManifest(indexDir: string): Promise<IndexManifest> {
 function isCompatibleVariantIndex(value: unknown): boolean {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
+  const enrichment = v.enrichment;
+  if (typeof enrichment !== "object" || enrichment === null) return false;
+  const e = enrichment as Record<string, unknown>;
   return (
     v.algorithm === "bottom-k-token-shingles-v1" &&
     v.shingleSize === 5 &&
@@ -112,6 +124,9 @@ function isCompatibleVariantIndex(value: unknown): boolean {
     v.maxAnchorPostings === 2000 &&
     v.anchorShardRouting === "sha256-anchor-hex-v1" &&
     v.sketchShardRouting === VARIANT_SKETCH_SHARD_ROUTING &&
+    e.algorithm === "precomputed-variant-summary-v1" &&
+    e.shardRouting === VARIANT_ENRICHMENT_SHARD_ROUTING &&
+    e.exampleLimit === 3 &&
     typeof v.skippedHotAnchorCount === "number"
   );
 }
@@ -210,7 +225,7 @@ export async function lookupInstructions(
 }
 
 /**
- * Read a schema-0.3 variant sketch micro-shard.
+ * Read a schema-0.3+ variant sketch micro-shard.
  * Route keys are stable physical identifiers such as "a1/b2".
  * Missing micro-shards represent an empty route and are therefore valid.
  */
@@ -230,6 +245,44 @@ export async function readSketchShard(
   ) as Promise<SketchShard>;
 }
 
+/**
+ * Read and validate one schema-0.4 precomputed variant-enrichment micro-shard.
+ * Missing, corrupt, malformed, or structurally invalid enrichment data is an
+ * index inconsistency because every scored candidate must have a summary.
+ */
+export async function readVariantEnrichmentShard(
+  indexDir: string,
+  routeKey: string,
+  observer?: ShardReadObserver,
+): Promise<VariantEnrichmentShard> {
+  const normalized = routeKey.toLowerCase();
+  if (!/^[0-9a-f]{2}\/[0-9a-f]{2}$/.test(normalized)) {
+    throw new IndexError(`Invalid variant enrichment route: ${routeKey}`);
+  }
+  const [directory, file] = normalized.split("/");
+  let shard: Record<string, unknown>;
+  try {
+    shard = await readGzipShard(
+      path.join(indexDir, "variants", "enrichment", directory, `${file}.json.gz`),
+      "variant_enrichment", normalized, observer,
+    );
+  } catch (error) {
+    if (error instanceof IndexError) {
+      throw new IndexError(
+        `Variant enrichment index is inconsistent at route ${normalized}: ${error.message}. Rebuild the index with the current builder.`,
+      );
+    }
+    throw error;
+  }
+
+  if (!isVariantEnrichmentShard(shard)) {
+    throw new IndexError(
+      `Variant enrichment index is inconsistent at route ${normalized}: invalid summary structure. Rebuild the index with the current builder.`,
+    );
+  }
+  return shard;
+}
+
 export async function readAnchorShard(
   indexDir: string,
   prefix: string,
@@ -239,6 +292,47 @@ export async function readAnchorShard(
     path.join(indexDir, "variants", "anchors", `${prefix}.json.gz`),
     "variant_anchor", prefix, observer,
   ) as Promise<AnchorShard>;
+}
+
+function isVariantEnrichmentShard(
+  shard: Record<string, unknown>,
+): shard is VariantEnrichmentShard {
+  for (const [instructionSha, value] of Object.entries(shard)) {
+    if (!/^[0-9a-f]{64}$/.test(instructionSha)) return false;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return false;
+    }
+    const record = value as Record<string, unknown>;
+    if (
+      !Number.isInteger(record.rawVariantCount) ||
+      (record.rawVariantCount as number) < 1 ||
+      !Number.isInteger(record.copyCount) ||
+      (record.copyCount as number) < 1 ||
+      !Array.isArray(record.examples) ||
+      record.examples.length > 3 ||
+      record.examples.length > (record.copyCount as number)
+    ) {
+      return false;
+    }
+    for (const example of record.examples) {
+      if (
+        typeof example !== "object" ||
+        example === null ||
+        Array.isArray(example)
+      ) {
+        return false;
+      }
+      const e = example as Record<string, unknown>;
+      if (
+        typeof e.repoFullName !== "string" ||
+        typeof e.path !== "string" ||
+        !(e.stars === null || typeof e.stars === "number")
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
