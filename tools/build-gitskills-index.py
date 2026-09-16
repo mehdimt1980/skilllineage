@@ -21,7 +21,7 @@ import tempfile
 from pathlib import Path
 
 
-SCHEMA_VERSION = "0.3"
+SCHEMA_VERSION = "0.4"
 KIND = "skilllineage-exact-index"
 SHARD_PREFIX_LENGTH = 2
 SHINGLE_SIZE = 5
@@ -31,6 +31,9 @@ ANCHOR_COUNT = 8
 MAX_ANCHOR_POSTINGS = 2000
 ANCHOR_SHARD_ROUTING = "sha256-anchor-hex-v1"
 SKETCH_SHARD_ROUTING = "variant-id-hex4-v1"
+ENRICHMENT_SHARD_ROUTING = "instructions-sha256-hex4-v1"
+ENRICHMENT_ALGORITHM = "precomputed-variant-summary-v1"
+ENRICHMENT_EXAMPLE_LIMIT = 3
 
 
 def anchor_shard_prefix(anchor: str) -> str:
@@ -39,10 +42,22 @@ def anchor_shard_prefix(anchor: str) -> str:
 
 
 def variant_sketch_route(variant_id: str):
-    """Return the two-level schema-0.3 physical route for a variant id."""
+    """Return the two-level schema-0.3+ physical route for a variant id."""
     normalized = variant_id.lower()
-    if len(normalized) < 4 or any(ch not in "0123456789abcdef" for ch in normalized[:4]):
+    if len(normalized) != SHINGLE_HASH_HEX_LENGTH or any(
+        ch not in "0123456789abcdef" for ch in normalized
+    ):
         raise ValueError(f"invalid variant id for sketch routing: {variant_id}")
+    return normalized[:2], normalized[2:4]
+
+
+def variant_enrichment_route(instructions_sha256: str):
+    """Return the schema-0.4 physical route for a normalized instruction hash."""
+    normalized = instructions_sha256.lower()
+    if len(normalized) != 64 or any(ch not in "0123456789abcdef" for ch in normalized):
+        raise ValueError(
+            f"invalid instructions SHA-256 for enrichment routing: {instructions_sha256}"
+        )
     return normalized[:2], normalized[2:4]
 
 
@@ -199,17 +214,20 @@ def main():
     instructions_dir = out_dir / "instructions"
     sketches_dir = out_dir / "variants" / "sketches"
     anchors_dir = out_dir / "variants" / "anchors"
+    enrichment_dir = out_dir / "variants" / "enrichment"
 
-    # Sketch schema 0.3 is sparse. Clear the sketch namespace so a rebuild into
-    # an existing output directory cannot retain obsolete schema-0.2 flat
-    # shards or stale schema-0.3 micro-shards from a previous dataset.
+    # Sparse schema namespaces must be cleared when reusing an output directory,
+    # otherwise stale files from an older dataset could survive a rebuild.
     if sketches_dir.exists():
         shutil.rmtree(sketches_dir)
+    if enrichment_dir.exists():
+        shutil.rmtree(enrichment_dir)
 
     exact_dir.mkdir(parents=True, exist_ok=True)
     instructions_dir.mkdir(parents=True, exist_ok=True)
     sketches_dir.mkdir(parents=True, exist_ok=True)
     anchors_dir.mkdir(parents=True, exist_ok=True)
+    enrichment_dir.mkdir(parents=True, exist_ok=True)
 
     conn = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
@@ -220,7 +238,12 @@ def main():
     try:
         record_count, distinct_hash_count = build_exact_index(conn, exact_dir)
         indexed_count, skipped_count, skipped_hot_anchor_count = build_instruction_index(
-            conn, instructions_dir, sketches_dir, anchors_dir, tmp_path
+            conn,
+            instructions_dir,
+            sketches_dir,
+            anchors_dir,
+            enrichment_dir,
+            tmp_path,
         )
     finally:
         conn.close()
@@ -263,6 +286,11 @@ def main():
             "maxAnchorPostings": MAX_ANCHOR_POSTINGS,
             "anchorShardRouting": ANCHOR_SHARD_ROUTING,
             "sketchShardRouting": SKETCH_SHARD_ROUTING,
+            "enrichment": {
+                "algorithm": ENRICHMENT_ALGORITHM,
+                "shardRouting": ENRICHMENT_SHARD_ROUTING,
+                "exampleLimit": ENRICHMENT_EXAMPLE_LIMIT,
+            },
             "skippedHotAnchorCount": skipped_hot_anchor_count,
         },
     }
@@ -397,20 +425,34 @@ def _finalize_exact_shard(shard_data: dict) -> None:
 # Instruction index — streaming via temp SQLite, all 256 shards
 # ---------------------------------------------------------------------------
 def build_instruction_index(
-    conn, instructions_dir: Path, sketches_dir: Path, anchors_dir: Path,
-    tmp_db_path: str
+    conn,
+    instructions_dir: Path,
+    sketches_dir: Path,
+    anchors_dir: Path,
+    enrichment_dir: Path,
+    tmp_db_path: str,
 ):
     tmp_conn = sqlite3.connect(tmp_db_path)
     try:
         return _populate_instruction_index(
-            conn, instructions_dir, sketches_dir, anchors_dir, tmp_conn
+            conn,
+            instructions_dir,
+            sketches_dir,
+            anchors_dir,
+            enrichment_dir,
+            tmp_conn,
         )
     finally:
         tmp_conn.close()
 
 
 def _populate_instruction_index(
-    conn, instructions_dir: Path, sketches_dir: Path, anchors_dir: Path, tmp_conn
+    conn,
+    instructions_dir: Path,
+    sketches_dir: Path,
+    anchors_dir: Path,
+    enrichment_dir: Path,
+    tmp_conn,
 ):
     tmp_conn.execute("PRAGMA temp_store = FILE")
     tmp_conn.execute("""
@@ -491,7 +533,10 @@ def _populate_instruction_index(
         else:
             tmp_conn.executemany(
                 "INSERT INTO variant_anchors (route_prefix, anchor_hash, variant_id) VALUES (?, ?, ?)",
-                [(anchor_shard_prefix(anchor), anchor, variant_id) for anchor in sketch[:ANCHOR_COUNT]],
+                [
+                    (anchor_shard_prefix(anchor), anchor, variant_id)
+                    for anchor in sketch[:ANCHOR_COUNT]
+                ],
             )
 
         if len(batch) >= BATCH_SIZE:
@@ -538,11 +583,14 @@ def _populate_instruction_index(
 
     _write_variant_sketches(tmp_conn, sketches_dir)
     skipped_hot_anchor_count = _write_variant_anchors(tmp_conn, anchors_dir)
+    _write_variant_enrichment(conn, tmp_conn, enrichment_dir)
 
     return indexed_count, skipped_count, skipped_hot_anchor_count
 
 
-def _write_instruction_shard(instructions_dir: Path, prefix: str, shard_data: dict) -> None:
+def _write_instruction_shard(
+    instructions_dir: Path, prefix: str, shard_data: dict
+) -> None:
     sorted_shard = {}
     for key in sorted(shard_data.keys()):
         sorted_shard[key] = sorted(shard_data[key])
@@ -604,6 +652,135 @@ def _write_variant_anchors(tmp_conn, anchors_dir: Path) -> int:
         write_gz_shard(anchors_dir / f"{current_prefix}.json.gz", current_shard)
     _write_missing_shards(anchors_dir)
     return skipped
+
+
+def _write_variant_enrichment(conn, tmp_conn, enrichment_dir: Path) -> None:
+    """Build sparse precomputed enrichment summaries with disk-backed staging."""
+    source_row = conn.execute("PRAGMA database_list").fetchone()
+    source_path = source_row[2] if source_row is not None else None
+    if not source_path:
+        raise RuntimeError("could not resolve source database path for enrichment")
+
+    tmp_conn.execute(
+        "CREATE INDEX IF NOT EXISTS instr_map_file_sha_idx ON instr_map(file_sha)"
+    )
+    tmp_conn.execute("""
+        CREATE TABLE enrichment_occurrences (
+            instruction_sha256 TEXT NOT NULL,
+            repo_full_name TEXT NOT NULL,
+            path TEXT NOT NULL,
+            stars INTEGER,
+            PRIMARY KEY (instruction_sha256, repo_full_name, path)
+        ) WITHOUT ROWID
+    """)
+
+    tmp_conn.execute("ATTACH DATABASE ? AS source_db", (source_path,))
+    try:
+        tmp_conn.execute("""
+            INSERT OR IGNORE INTO enrichment_occurrences
+                (instruction_sha256, repo_full_name, path, stars)
+            SELECT
+                im.instruction_sha256,
+                a.repo_full_name,
+                a.path,
+                r.stars
+            FROM source_db.artifacts a
+            JOIN instr_map im ON im.file_sha = LOWER(a.file_sha)
+            LEFT JOIN source_db.repos r ON a.repo_full_name = r.full_name
+            WHERE (a.path GLOB '*/SKILL.md' OR a.path = 'SKILL.md')
+              AND a.file_sha IS NOT NULL
+              AND a.repo_full_name IS NOT NULL
+              AND a.path IS NOT NULL
+        """)
+        tmp_conn.commit()
+    finally:
+        tmp_conn.execute("DETACH DATABASE source_db")
+
+    tmp_conn.execute("""
+        CREATE INDEX enrichment_occurrence_order_idx
+        ON enrichment_occurrences (
+            instruction_sha256,
+            (stars IS NULL),
+            stars DESC,
+            repo_full_name,
+            path
+        )
+    """)
+    tmp_conn.commit()
+
+    raw_counts = tmp_conn.execute("""
+        SELECT instruction_sha256, COUNT(*)
+        FROM instr_map
+        GROUP BY instruction_sha256
+        ORDER BY instruction_sha256
+    """)
+    occurrences = iter(tmp_conn.execute("""
+        SELECT instruction_sha256, repo_full_name, path, stars
+        FROM enrichment_occurrences
+        ORDER BY instruction_sha256,
+                 (stars IS NULL),
+                 stars DESC,
+                 repo_full_name,
+                 path
+    """))
+    current_occurrence = next(occurrences, None)
+    current_route = None
+    current_shard = {}
+
+    for instr_sha, raw_variant_count in raw_counts:
+        while current_occurrence is not None and current_occurrence[0] < instr_sha:
+            raise RuntimeError(
+                "enrichment staging contains an instruction hash absent from instr_map: "
+                + current_occurrence[0]
+            )
+
+        copy_count = 0
+        examples = []
+        while current_occurrence is not None and current_occurrence[0] == instr_sha:
+            _, repo_full_name, occurrence_path, stars = current_occurrence
+            copy_count += 1
+            if len(examples) < ENRICHMENT_EXAMPLE_LIMIT:
+                examples.append(
+                    {
+                        "repoFullName": repo_full_name,
+                        "path": occurrence_path,
+                        "stars": stars,
+                    }
+                )
+            current_occurrence = next(occurrences, None)
+
+        if copy_count == 0:
+            raise RuntimeError(
+                "cannot build variant enrichment summary for instruction hash "
+                + instr_sha
+            )
+
+        directory, file_prefix = variant_enrichment_route(instr_sha)
+        route = (directory, file_prefix)
+        if current_route is not None and route != current_route:
+            write_gz_shard(
+                enrichment_dir / current_route[0] / f"{current_route[1]}.json.gz",
+                current_shard,
+            )
+            current_shard = {}
+        current_route = route
+        current_shard[instr_sha] = {
+            "rawVariantCount": raw_variant_count,
+            "copyCount": copy_count,
+            "examples": examples,
+        }
+
+    if current_occurrence is not None:
+        raise RuntimeError(
+            "enrichment staging contains trailing instruction hash absent from instr_map: "
+            + current_occurrence[0]
+        )
+
+    if current_route is not None:
+        write_gz_shard(
+            enrichment_dir / current_route[0] / f"{current_route[1]}.json.gz",
+            current_shard,
+        )
 
 
 def _write_missing_shards(shards_dir: Path) -> None:
