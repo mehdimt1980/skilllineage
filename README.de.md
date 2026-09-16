@@ -106,6 +106,7 @@ Implementiert:
 - [x] manueller Benchmark für echte GitSkills-Daten
 - [x] Full-Scale-Retrieval-Profiling
 - [x] Schema-0.3-Microsharding für Variant-Sketches
+- [x] Schema-0.4 mit vorab berechneten Variant-Enrichment-Summaries
 
 Geplant:
 
@@ -160,21 +161,29 @@ tools/
 
 Die Analyse-Engines sind bewusst von der CLI-Darstellung getrennt, damit sie später auch in CI, GitHub Actions oder anderen Anwendungen wiederverwendet werden können.
 
-## Indexschema 0.3
+## Indexschema 0.4
 
-Schema 0.3 ändert ausschließlich das physische Layout des Variant-Sketch-Stores. Exact- und normalisierte Instruction-Shards bleiben Zwei-Hex-Shards; das Anchor-Routing bleibt unverändert `sha256-anchor-hex-v1`.
+Schema 0.4 behält das mit Schema 0.3 eingeführte Vier-Hex-Microsharding für Variant-Sketches bei und ergänzt sparse, vorab berechnete Enrichment-Summaries für normalisierte Instruction-Hashes.
 
-Variant-Sketches verwenden jetzt die ersten vier Hex-Zeichen der `variantId` als zweistufige physische Route:
+Variant-Sketches werden weiterhin anhand der ersten vier Hex-Zeichen der `variantId` geroutet:
 
 ```text
 variants/sketches/a1/b2.json.gz
 ```
 
-für eine Variant-ID, die mit `a1b2...` beginnt. Es werden nur nichtleere Sketch-Microshards geschrieben. Fehlende Sketch-Microshards gelten als leere Route; für fehlende Exact-, Instruction- und Anchor-Shards bleibt das strengere Verhalten unverändert.
+Variant-Enrichment-Summaries werden unabhängig davon anhand der ersten vier Hex-Zeichen des vollständigen SHA-256 der normalisierten Instructions geroutet:
 
-Der Matching-Algorithmus selbst ändert sich nicht: Normalisierung, 5-Token-Shingles, Bottom-32-Sketch, Anchor-Generierung, geschätzte Similarity, Schwellenwerte, Caps, Ranking, Enrichment und Trace-Priorität bleiben identisch. Es handelt sich um eine reine I/O-/Layout-Optimierung, damit beim Scoring nicht große Mengen irrelevanter Sketch-Daten dekomprimiert werden müssen.
+```text
+variants/enrichment/a1/b2.json.gz
+```
 
-Schema-0.2-Indizes sind nicht mit dem Schema-0.3-Reader kompatibel und müssen mit dem aktuellen Builder neu erzeugt werden.
+Es werden nur nichtleere Sketch- und Enrichment-Microshards geschrieben. Die Enrichment-Summaries enthalten ausschließlich die statischen Daten, die für die Darstellung der finalen Variant-Kandidaten benötigt werden: Anzahl der Raw-Varianten, deduplizierte Copy-Anzahl und bis zu drei deterministisch sortierte Repository-/Pfad-Beispiele. Skill-Quelltext und normalisierter Instruction-Text werden nicht gespeichert.
+
+Zur Trace-Zeit werden diese Summaries nicht mehr durch das Lesen von Instruction-Shards und mehreren Exact-Shards rekonstruiert. Finale Variant-Kandidaten lesen direkt die benötigten Enrichment-Microshards, höchstens einmal pro eindeutiger Enrichment-Route. Fehlende oder fehlerhafte erforderliche Enrichment-Daten gelten als inkonsistenter Index und erfordern einen Neuaufbau.
+
+Der Matching-Algorithmus bleibt unverändert: Normalisierung, 5-Token-Shingles, Bottom-32-Sketch, Anchor-Generierung, geschätzte Similarity, Schwellenwerte, Caps, Ranking und Trace-Priorität ändern sich nicht. Schema 0.4 ist eine Index-/Runtime-I/O-Optimierung; es führt keine historische Origin-Inference ein und verändert die Similarity-Semantik nicht.
+
+Schema-0.3- und ältere Indizes sind nicht mit dem Schema-0.4-Reader kompatibel und müssen mit dem aktuellen Builder neu erzeugt werden.
 
 ## Continuous Integration
 
@@ -197,9 +206,9 @@ python tools/benchmark-gitskills.py \
 
 Die Harness zieht deterministische Stichproben realer Skills und misst Indexgröße, In-Process-Trace-Latenz, Exact- und Same-Instructions-Trefferraten sowie Recall@1/3/10 für kontrollierte leichte und mittlere Mutationen. Sie verändert oder lädt den Quelldatensatz nicht herunter und läuft nicht in der CI. `--keep-temp` dient ausschließlich der gezielten Untersuchung erzeugter Fixtures.
 
-Das Benchmarkschema 0.2 profiliert zusätzlich den echten Retrieval-Pfad: Shard-I/O, komprimierte und dekomprimierte Bytes, Stage-Timings, Kandidatenentwicklung, Hinweise auf ausgelassene Hot-Anchors und deterministische Slow-Query-Zusammenfassungen. Dieses diagnostische Profiling verändert die Trace-Semantik nicht. Timing-Werte hängen stark von Speicher, Betriebssystem und Cache-Zustand ab; Benchmark-Ausgaben enthalten niemals Skill-Quelltext.
+Das Benchmarkschema 0.2 profiliert zusätzlich den echten Retrieval-Pfad: Shard-I/O, komprimierte und dekomprimierte Bytes, Stage-Timings, Kandidatenentwicklung, Hinweise auf ausgelassene Hot-Anchors, deterministische Slow-Query-Zusammenfassungen sowie separates `variant_enrichment`-I/O. Die Indexgrößenmetriken erfassen außerdem rekursiv `variants/enrichment/` und dessen Shard-Größenverteilung. Dieses diagnostische Profiling verändert die Trace-Semantik nicht. Timing-Werte hängen stark von Speicher, Betriebssystem und Cache-Zustand ab; Benchmark-Ausgaben enthalten niemals Skill-Quelltext.
 
-Die Variantensuche ist approximativ. Der Benchmark meldet den exakten Jaccard-Wert normalisierter 5-Token-Shingles getrennt von der Sketch-Schätzung, einschließlich Recall für Mutationen mit einem exakten Wert von mindestens 0,70. Aggregierte Diagnosen zeigen Verluste bei Kandidatengenerierung und Filterung; `--details-output` schreibt bei Bedarf Einzeldiagnosen ohne Skill-Quelltext. Schema-0.2- und ältere Indizes müssen vor Trace oder Benchmark mit dem aktuellen Builder neu erzeugt werden.
+Die Variantensuche ist approximativ. Der Benchmark meldet den exakten Jaccard-Wert normalisierter 5-Token-Shingles getrennt von der Sketch-Schätzung, einschließlich Recall für Mutationen mit einem exakten Wert von mindestens 0,70. Aggregierte Diagnosen zeigen Verluste bei Kandidatengenerierung und Filterung; `--details-output` schreibt bei Bedarf Einzeldiagnosen ohne Skill-Quelltext. Schema-0.3- und ältere Indizes müssen vor Trace oder Benchmark mit dem aktuellen Builder neu erzeugt werden.
 
 ## GitSkills-Hinweis
 

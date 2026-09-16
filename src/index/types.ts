@@ -5,7 +5,7 @@
  */
 
 export interface IndexManifest {
-  readonly schemaVersion: "0.3";
+  readonly schemaVersion: "0.4";
   readonly kind: "skilllineage-exact-index";
   readonly source: IndexSource;
   readonly indexes: IndexDescriptors;
@@ -46,7 +46,14 @@ export interface VariantIndexDescriptor {
   readonly maxAnchorPostings: 2000;
   readonly anchorShardRouting: "sha256-anchor-hex-v1";
   readonly sketchShardRouting: "variant-id-hex4-v1";
+  readonly enrichment: VariantEnrichmentDescriptor;
   readonly skippedHotAnchorCount: number;
+}
+
+export interface VariantEnrichmentDescriptor {
+  readonly algorithm: "precomputed-variant-summary-v1";
+  readonly shardRouting: "instructions-sha256-hex4-v1";
+  readonly exampleLimit: 3;
 }
 
 export interface IndexOccurrence {
@@ -81,5 +88,18 @@ export interface VariantSketchRecord {
   readonly sketch: readonly string[];
 }
 
+export interface VariantEnrichmentExample {
+  readonly repoFullName: string;
+  readonly path: string;
+  readonly stars: number | null;
+}
+
+export interface VariantEnrichmentRecord {
+  readonly rawVariantCount: number;
+  readonly copyCount: number;
+  readonly examples: readonly VariantEnrichmentExample[];
+}
+
 export type SketchShard = Record<string, VariantSketchRecord>;
 export type AnchorShard = Record<string, string[]>;
+export type VariantEnrichmentShard = Record<string, VariantEnrichmentRecord>;

@@ -4,20 +4,21 @@ import { performance } from "node:perf_hooks";
 
 import { fingerprint, normalizeInstructions } from "../fingerprint/index.js";
 import {
+  IndexError,
   readManifest,
   lookupExact,
   lookupInstructions,
-  shardPrefix,
   readShard,
-  readInstructionShard,
   readAnchorShard,
   readSketchShard,
+  readVariantEnrichmentShard,
+  variantEnrichmentRoute,
+  shardPrefix,
 } from "../index/index.js";
 import type {
   IndexOccurrence,
   IndexHashEntry,
-  IndexShard,
-  InstructionShard,
+  VariantEnrichmentRecord,
 } from "../index/types.js";
 import {
   DEFAULT_ANCHOR_COUNT,
@@ -56,17 +57,20 @@ export async function traceSkill(
 ): Promise<TraceReport> {
   const profile = profilingOptions?.profile;
   const observer = profile
-    ? (event: import("../index/reader.js").ShardReadEvent) => profile.shardReads.push(event)
+    ? (event: import("../index/reader.js").ShardReadEvent) =>
+        profile.shardReads.push(event)
     : undefined;
   const totalStart = profile ? performance.now() : 0;
-  const timed = async <T>(name: string, operation: () => Promise<T>): Promise<T> => {
+  const timed = async <T>(
+    name: string,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
     const started = profile ? performance.now() : 0;
     const value = await operation();
     if (profile) profile.stages[name] = performance.now() - started;
     return value;
   };
 
-  // Validate index directory exists
   let indexStat;
   try {
     indexStat = await stat(indexDir);
@@ -77,13 +81,12 @@ export async function traceSkill(
     throw new TraceError(`Not a directory: ${indexDir}`);
   }
 
-  // Read and validate manifest
   await timed("manifestMs", () => readManifest(indexDir));
 
-  // Fingerprint the local skill (reuses all existing validation)
-  const fp = await timed("fingerprintMs", () => fingerprint(skillPath, toolVersion));
+  const fp = await timed("fingerprintMs", () =>
+    fingerprint(skillPath, toolVersion),
+  );
 
-  // Extract raw hex hashes (strip prefixes)
   const gitBlobSha1 = fp.fingerprints.gitBlobSha1;
   const instructionsSha256 = fp.fingerprints.instructionsSha256;
   const hexBlobHash = gitBlobSha1.replace(/^sha1:/, "");
@@ -91,7 +94,6 @@ export async function traceSkill(
 
   const query = { gitBlobSha1, instructionsSha256 };
 
-  // Step 1: Exact raw Git blob match — reads exactly one shard
   const exactEntry = await timed("exactLookupMs", () =>
     lookupExact(indexDir, hexBlobHash, observer),
   );
@@ -109,8 +111,6 @@ export async function traceSkill(
     };
   }
 
-  // Step 2: Same normalized instructions — reads one instruction shard,
-  // then at most one exact shard per unique prefix among the matched hashes.
   const blobHashes = await timed("instructionLookupMs", () =>
     lookupInstructions(indexDir, hexInstructionHash, observer),
   );
@@ -129,7 +129,6 @@ export async function traceSkill(
     };
   }
 
-  // Step 3: Approximate variant candidates.
   const rawSkill = await readFile(
     path.join(path.resolve(skillPath), "SKILL.md"),
     "utf-8",
@@ -180,7 +179,7 @@ export async function traceSkill(
     scoreVariantCandidates(
       localSketch,
       generated.candidates,
-      (prefix) => readSketchShard(indexDir, prefix, observer),
+      (routeKey) => readSketchShard(indexDir, routeKey, observer),
       scoringStats,
     ),
   );
@@ -206,7 +205,6 @@ export async function traceSkill(
     };
   }
 
-  // Step 4: No match
   if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
   return {
     schemaVersion: "0.1",
@@ -220,82 +218,68 @@ export async function traceSkill(
   };
 }
 
-async function enrichVariantCandidates(
+/**
+ * Resolve static presentation metadata for already-ranked variant candidates.
+ * Schema 0.4 stores this material at build time, so enrichment no longer
+ * reconstructs occurrences by scanning instruction and exact shards.
+ */
+export async function enrichVariantCandidates(
   indexDir: string,
   scored: readonly ScoredCandidate[],
   observer?: import("../index/reader.js").ShardReadObserver,
   profile?: import("./types.js").TraceProfiling,
 ): Promise<VariantCandidate[]> {
-  const instructionCache = new Map<string, InstructionShard>();
-  const exactCache = new Map<string, IndexShard>();
-  const result: VariantCandidate[] = [];
-
+  const byRoute = new Map<string, ScoredCandidate[]>();
   for (const candidate of scored) {
-    const instructionPrefix = shardPrefix(candidate.instructionsSha256);
-    let instructionShard = instructionCache.get(instructionPrefix);
-    if (!instructionShard) {
-      instructionShard = await readInstructionShard(
-        indexDir,
-        instructionPrefix,
-        observer,
+    const routeKey = variantEnrichmentRoute(candidate.instructionsSha256).key;
+    const group = byRoute.get(routeKey) ?? [];
+    group.push(candidate);
+    byRoute.set(routeKey, group);
+  }
+
+  const summaries = new Map<string, VariantEnrichmentRecord>();
+  for (const [routeKey, groupedCandidates] of byRoute) {
+    const shard = await readVariantEnrichmentShard(indexDir, routeKey, observer);
+    for (const candidate of groupedCandidates) {
+      if (
+        !Object.prototype.hasOwnProperty.call(
+          shard,
+          candidate.instructionsSha256,
+        )
+      ) {
+        throw new IndexError(
+          `Variant enrichment index is inconsistent: missing summary for ${candidate.instructionsSha256} in route ${routeKey}. Rebuild the index with the current builder.`,
+        );
+      }
+      summaries.set(
+        candidate.instructionsSha256,
+        shard[candidate.instructionsSha256],
       );
-      instructionCache.set(instructionPrefix, instructionShard);
     }
-    const blobHashes = [
-      ...new Set(instructionShard[candidate.instructionsSha256] ?? []),
-    ].sort();
-    const occurrences = new Map<string, IndexOccurrence>();
-
-    for (const blobHash of blobHashes) {
-      const exactPrefix = shardPrefix(blobHash);
-      let exactShard = exactCache.get(exactPrefix);
-      if (!exactShard) {
-        exactShard = await readShard(indexDir, exactPrefix, observer);
-        exactCache.set(exactPrefix, exactShard);
-      }
-      if (!Object.prototype.hasOwnProperty.call(exactShard, blobHash)) continue;
-      for (const occurrence of exactShard[blobHash].occurrences) {
-        const key = `${occurrence.repoFullName}\0${occurrence.path}`;
-        if (!occurrences.has(key)) occurrences.set(key, occurrence);
-      }
-    }
-
-    const orderedOccurrences = [...occurrences.values()].sort(compareExamples);
-    result.push({
-      instructionsSha256: `sha256:${candidate.instructionsSha256}`,
-      estimatedSimilarity: Number(candidate.estimatedSimilarity.toFixed(4)),
-      sharedAnchors: candidate.sharedAnchors,
-      rawVariantCount: blobHashes.length,
-      copyCount: orderedOccurrences.length,
-      examples: orderedOccurrences.slice(0, 3).map((occurrence) => ({
-        repoFullName: occurrence.repoFullName,
-        path: occurrence.path,
-        stars: occurrence.stars,
-      })),
-    });
   }
 
   if (profile) {
-    profile.counts.enrichmentInstructionShardCount = instructionCache.size;
-    profile.counts.enrichmentExactShardCount = exactCache.size;
+    profile.counts.enrichmentSummaryShardCount = byRoute.size;
+    profile.counts.enrichmentInstructionShardCount = 0;
+    profile.counts.enrichmentExactShardCount = 0;
   }
-  return result;
-}
 
-function compareExamples(a: IndexOccurrence, b: IndexOccurrence): number {
-  if (a.stars === null && b.stars !== null) return 1;
-  if (a.stars !== null && b.stars === null) return -1;
-  if (a.stars !== null && b.stars !== null && a.stars !== b.stars) {
-    return b.stars - a.stars;
-  }
-  return (
-    compareStrings(a.repoFullName, b.repoFullName) ||
-    compareStrings(a.path, b.path)
-  );
-}
-
-function compareStrings(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
+  return scored.map((candidate) => {
+    const summary = summaries.get(candidate.instructionsSha256);
+    if (!summary) {
+      throw new IndexError(
+        `Variant enrichment index is inconsistent: missing summary for ${candidate.instructionsSha256}. Rebuild the index with the current builder.`,
+      );
+    }
+    return {
+      instructionsSha256: `sha256:${candidate.instructionsSha256}`,
+      estimatedSimilarity: Number(candidate.estimatedSimilarity.toFixed(4)),
+      sharedAnchors: candidate.sharedAnchors,
+      rawVariantCount: summary.rawVariantCount,
+      copyCount: summary.copyCount,
+      examples: summary.examples,
+    };
+  });
 }
 
 /**
@@ -312,9 +296,6 @@ export async function buildSameInstructionsMatch(
 ): Promise<SameInstructionsMatch> {
   const distinctBlobHashes = [...new Set(blobHashes)].sort();
 
-  // Group hashes by their exact-shard prefix, reads each required
-  // exact shard at most once, collects all occurrences, deduplicates,
-  // then sorts deterministically.
   const byPrefix = new Map<string, string[]>();
   for (const h of distinctBlobHashes) {
     const pfx = shardPrefix(h);
@@ -326,7 +307,6 @@ export async function buildSameInstructionsMatch(
     }
   }
 
-  // Collect occurrences across all matching entries (one shard read per prefix)
   const occurrencesByLocation = new Map<string, IndexOccurrence>();
 
   for (const [pfx, hashes] of byPrefix) {
@@ -349,7 +329,6 @@ export async function buildSameInstructionsMatch(
     }
   }
 
-  // Sort occurrences deterministically: repoFullName then path
   const allOccurrences = [...occurrencesByLocation.values()].sort((a, b) => {
     const r =
       a.repoFullName < b.repoFullName
@@ -361,7 +340,6 @@ export async function buildSameInstructionsMatch(
     return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
   });
 
-  // Build sorted contentHashes with sha1: prefix
   const contentHashes = distinctBlobHashes.map((h) => `sha1:${h}`);
 
   return {

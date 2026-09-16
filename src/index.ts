@@ -29,9 +29,12 @@ export {
   lookupInstructions,
   readAnchorShard,
   readSketchShard,
+  readVariantEnrichmentShard,
   shardPrefix,
   VARIANT_SKETCH_SHARD_ROUTING,
+  VARIANT_ENRICHMENT_SHARD_ROUTING,
   variantSketchRoute,
+  variantEnrichmentRoute,
   IndexError,
 } from "./index/index.js";
 export type {
@@ -45,10 +48,15 @@ export type {
   IndexShard,
   InstructionShard,
   VariantIndexDescriptor,
+  VariantEnrichmentDescriptor,
   SketchShard,
   AnchorShard,
   VariantSketchRecord,
   VariantSketchRoute,
+  VariantEnrichmentRoute,
+  VariantEnrichmentExample,
+  VariantEnrichmentRecord,
+  VariantEnrichmentShard,
 } from "./index/index.js";
 export {
   estimateSketchSimilarity,
