@@ -106,6 +106,7 @@ Implemented:
 - [x] manual real-GitSkills benchmark harness
 - [x] full-scale retrieval profiling
 - [x] schema-0.3 variant-sketch micro-sharding
+- [x] schema-0.4 precomputed variant-enrichment summaries
 
 Planned:
 
@@ -160,21 +161,29 @@ tools/
 
 The analysis engines are intentionally kept independent from CLI presentation so they can later be reused from CI, GitHub Actions, or other applications.
 
-## Index schema 0.3
+## Index schema 0.4
 
-Schema 0.3 changes only the physical layout of the variant-sketch store. Exact and normalized-instruction shards remain two-hex shards, and anchor routing remains `sha256-anchor-hex-v1`.
+Schema 0.4 retains the schema-0.3 four-hex micro-shard layout for variant sketches and adds sparse precomputed enrichment summaries for normalized instruction hashes.
 
-Variant sketches now use four hex characters of the `variantId` as a two-level physical route:
+Variant sketches remain routed by the first four hex characters of the `variantId`:
 
 ```text
 variants/sketches/a1/b2.json.gz
 ```
 
-for a variant ID beginning with `a1b2...`. Only non-empty sketch micro-shards are written. Missing sketch micro-shards are interpreted as empty routes; missing exact, instruction, and anchor shards retain their stricter behavior.
+Variant enrichment summaries are routed independently by the first four hex characters of the full normalized-instruction SHA-256:
 
-The matching algorithm is unchanged: normalization, 5-token shingles, bottom-32 sketching, anchor generation, estimated similarity, thresholds, caps, ranking, enrichment, and trace precedence are identical. This is an I/O/layout optimization designed to avoid decompressing large amounts of irrelevant sketch data during scoring.
+```text
+variants/enrichment/a1/b2.json.gz
+```
 
-Schema-0.2 indexes are not compatible with the schema-0.3 reader and must be rebuilt with the current builder.
+Only non-empty sketch and enrichment micro-shards are written. Enrichment summaries contain only the static fields needed for final variant presentation: raw variant count, deduplicated copy count, and up to three deterministically ordered repository/path examples. They do not contain Skill source text or normalized instruction text.
+
+At trace time, variant candidates no longer reconstruct these summaries by reading instruction shards and multiple exact shards. Final candidates read the required enrichment micro-shards directly, with one physical read per unique enrichment route. Missing or malformed required enrichment data is treated as an inconsistent index and requires a rebuild.
+
+The matching algorithm is unchanged: normalization, 5-token shingles, bottom-32 sketching, anchor generation, estimated similarity, thresholds, caps, ranking, and trace precedence are unchanged. Schema 0.4 is an index/runtime I/O optimization; it does not introduce historical origin inference or change similarity semantics.
+
+Schema-0.3 and older indexes are not compatible with the schema-0.4 reader and must be rebuilt with the current builder.
 
 ## Continuous Integration
 
@@ -197,9 +206,9 @@ python tools/benchmark-gitskills.py \
 
 The harness deterministically samples real Skills and measures index size, in-process trace latency, exact and same-instruction hit rates, and Recall@1/3/10 for controlled light and medium mutations. It does not modify or download the source dataset, and it is not run by CI. Use `--keep-temp` only when fixture inspection is needed.
 
-Benchmark schema 0.2 also profiles the real retrieval pipeline: shard I/O, compressed and decompressed bytes, stage timings, candidate progression, hot-anchor omission evidence, and deterministic slow-query summaries. This diagnostic profiling does not alter trace semantics. Timings depend strongly on storage, operating system, and cache state; benchmark output never includes Skill source text.
+Benchmark schema 0.2 also profiles the real retrieval pipeline: shard I/O, compressed and decompressed bytes, stage timings, candidate progression, hot-anchor omission evidence, deterministic slow-query summaries, and separate `variant_enrichment` I/O. Index-size metrics include the recursive `variants/enrichment/` namespace and its shard-size distribution. This diagnostic profiling does not alter trace semantics. Timings depend strongly on storage, operating system, and cache state; benchmark output never includes Skill source text.
 
-Variant retrieval is approximate. The benchmark reports exact normalized 5-token-shingle Jaccard similarity separately from sketch-estimated similarity, including recall for mutations with exact similarity at least 0.70. Aggregate diagnostics identify candidate-generation and filtering misses; optional `--details-output` records per-query diagnostics without Skill source text. Rebuild schema-0.2 and older indexes with the current builder before tracing or benchmarking.
+Variant retrieval is approximate. The benchmark reports exact normalized 5-token-shingle Jaccard similarity separately from sketch-estimated similarity, including recall for mutations with exact similarity at least 0.70. Aggregate diagnostics identify candidate-generation and filtering misses; optional `--details-output` records per-query diagnostics without Skill source text. Rebuild schema-0.3 and older indexes with the current builder before tracing or benchmarking.
 
 ## GitSkills attribution
 
