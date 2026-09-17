@@ -57,6 +57,8 @@ def parse_iso_timestamp(val: Any) -> tuple[datetime | None, str]:
         dt = datetime.fromisoformat(s_iso)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
         return dt, "valid"
     except Exception:
         pass
@@ -66,6 +68,8 @@ def parse_iso_timestamp(val: Any) -> tuple[datetime | None, str]:
             dt = datetime.strptime(s, fmt)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = dt.astimezone(timezone.utc)
             return dt, "valid"
         except Exception:
             continue
@@ -177,7 +181,7 @@ def run_audit(
         # Configure temp database for performance
         temp_conn.execute("PRAGMA synchronous = OFF;")
         temp_conn.execute("PRAGMA journal_mode = OFF;")
-        temp_conn.execute("PRAGMA temp_store = MEMORY;")
+        temp_conn.execute("PRAGMA temp_store = FILE;")
 
         temp_conn.execute("""
             CREATE TABLE occ (
@@ -243,10 +247,10 @@ def run_audit(
             last_dt, last_status = parse_iso_timestamp(last_raw)
 
             first_epoch = first_dt.timestamp() if first_dt else None
-            first_iso = first_dt.isoformat().replace("+00:00", "Z") if first_dt else None
+            first_iso = first_dt.isoformat(timespec="microseconds").replace("+00:00", "Z") if first_dt else None
 
             last_epoch = last_dt.timestamp() if last_dt else None
-            last_iso = last_dt.isoformat().replace("+00:00", "Z") if last_dt else None
+            last_iso = last_dt.isoformat(timespec="microseconds").replace("+00:00", "Z") if last_dt else None
 
             batch.append((
                 file_sha,
@@ -302,14 +306,18 @@ def run_audit(
             );
         """)
 
+        # Match the canonical index builder exactly: case-fold the raw hash and
+        # select MAX(content) deterministically for each distinct raw hash. Empty
+        # strings are valid content; only NULL content is unindexable.
         rep_query = """
-            SELECT a.file_sha, a.content
+            SELECT
+                LOWER(a.file_sha) AS file_sha,
+                MAX(a.content) AS content
             FROM artifacts a
             WHERE (a.path GLOB '*/SKILL.md' OR a.path = 'SKILL.md')
               AND a.file_sha IS NOT NULL
-              AND a.content IS NOT NULL
-              AND a.content != ''
-            GROUP BY a.file_sha
+            GROUP BY LOWER(a.file_sha)
+            ORDER BY LOWER(a.file_sha)
         """
         rep_cur = source_conn.execute(rep_query)
         fi_batch: list[tuple[str, str]] = []
@@ -317,7 +325,7 @@ def run_audit(
         for row in rep_cur:
             f_sha = str(row["file_sha"]).lower()
             content = row["content"]
-            if not f_sha or not content:
+            if not f_sha or content is None:
                 continue
             try:
                 instr_sha = instruction_sha256(content)
@@ -363,11 +371,12 @@ def run_audit(
             GROUP BY file_sha;
         """)
 
-        # Create summary table for instruction groups
+        # Summarize only hashes that the canonical builder can map to a real
+        # normalized instruction SHA. Unindexable hashes are counted separately.
         temp_conn.execute("""
             CREATE TABLE instr_summary AS
             SELECT
-                COALESCE(fi.instructions_sha256, 'unindexed:' || occ.file_sha) as instructions_sha256,
+                fi.instructions_sha256 as instructions_sha256,
                 COUNT(DISTINCT occ.file_sha) as raw_variant_count,
                 COUNT(*) as occ_count,
                 COUNT(DISTINCT occ.repo_full_name) as repo_count,
@@ -377,8 +386,8 @@ def run_audit(
                 MIN(CASE WHEN occ.first_status = 'valid' THEN occ.first_iso ELSE NULL END) as min_first_iso,
                 MAX(CASE WHEN occ.first_status = 'valid' THEN occ.first_iso ELSE NULL END) as max_first_iso
             FROM occ
-            LEFT JOIN file_instructions fi ON occ.file_sha = fi.file_sha
-            GROUP BY COALESCE(fi.instructions_sha256, 'unindexed:' || occ.file_sha);
+            JOIN file_instructions fi ON occ.file_sha = fi.file_sha
+            GROUP BY fi.instructions_sha256;
         """)
 
         # Calculate metrics
@@ -787,6 +796,8 @@ def _build_report_payload(
 
     # 7. Normalized-instruction Group Audit
     total_instr_groups = temp_conn.execute("SELECT COUNT(*) FROM instr_summary;").fetchone()[0]
+    indexed_raw_hashes = temp_conn.execute("SELECT COUNT(*) FROM file_instructions;").fetchone()[0]
+    unindexed_raw_hashes = max(0, distinct_exact_hashes - indexed_raw_hashes)
     single_variant_instr = temp_conn.execute("SELECT COUNT(*) FROM instr_summary WHERE raw_variant_count = 1;").fetchone()[0]
     multi_variant_instr = temp_conn.execute("SELECT COUNT(*) FROM instr_summary WHERE raw_variant_count > 1;").fetchone()[0]
 
@@ -863,6 +874,8 @@ def _build_report_payload(
 
     normalized_instructions_sec = {
         "totalInstructionGroups": total_instr_groups,
+        "indexedDistinctRawHashes": indexed_raw_hashes,
+        "unindexedDistinctRawHashes": unindexed_raw_hashes,
         "rawVariantDistribution": {
             "singleVariant": {"count": single_variant_instr, "percentage": _calc_pct(single_variant_instr, total_instr_groups)},
             "multiVariant": {"count": multi_variant_instr, "percentage": _calc_pct(multi_variant_instr, total_instr_groups)},

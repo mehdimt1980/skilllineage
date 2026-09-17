@@ -441,5 +441,58 @@ class TestAuditHistory(BaseSyntheticDbTestCase):
         self.assertIn("Required column 'first_commit_at' not found", str(ctx.exception))
 
 
+    def test_builder_representative_content_parity_and_casefolded_sha(self) -> None:
+        """Representative content mirrors LOWER(file_sha) + MAX(content)."""
+        raw_sha_upper = "AB" * 20
+        raw_sha_lower = raw_sha_upper.lower()
+        artifacts = [
+            {"file_sha": raw_sha_upper, "repo_full_name": "repo/a", "path": "SKILL.md", "content": "Alpha\n", "first_commit_at": "2026-01-01T00:00:00Z", "last_commit_at": "2026-01-01T00:00:00Z", "history_fetched": 1},
+            {"file_sha": raw_sha_lower, "repo_full_name": "repo/b", "path": "nested/SKILL.md", "content": "Zulu\n", "first_commit_at": "2026-01-02T00:00:00Z", "last_commit_at": "2026-01-02T00:00:00Z", "history_fetched": 1},
+        ]
+        db_path = self.create_synthetic_db(artifacts)
+        report = run_audit(db_path)
+
+        instr = report["normalizedInstructions"]
+        self.assertEqual(report["dataset"]["distinctSkillRawHashes"], 1)
+        self.assertEqual(instr["indexedDistinctRawHashes"], 1)
+        self.assertEqual(instr["unindexedDistinctRawHashes"], 0)
+        self.assertEqual(instr["totalInstructionGroups"], 1)
+        self.assertEqual(instr["largestGroups"][0]["instructionsSha256"], instruction_sha256("Zulu\n"))
+        self.assertEqual(instr["largestGroups"][0]["occurrenceCount"], 2)
+
+    def test_timezone_offsets_canonicalize_to_same_observed_instant(self) -> None:
+        """Equivalent offset timestamps are one UTC observation, not a conflict."""
+        sha = "cd" * 20
+        artifacts = [
+            {"file_sha": sha, "repo_full_name": "repo/a", "path": "SKILL.md", "content": "Same\n", "first_commit_at": "2026-01-01T00:00:00Z", "last_commit_at": "2026-01-01T01:00:00Z", "history_fetched": 1},
+            {"file_sha": sha, "repo_full_name": "repo/b", "path": "nested/SKILL.md", "content": "Same\n", "first_commit_at": "2025-12-31T19:00:00-05:00", "last_commit_at": "2025-12-31T20:00:00-05:00", "history_fetched": 1},
+        ]
+        db_path = self.create_synthetic_db(artifacts)
+        report = run_audit(db_path)
+
+        consistency = report["exactContent"]["multiOccurrenceAudit"]["firstCommitDateConsistency"]
+        self.assertEqual(consistency["singleDistinctDate"]["count"], 1)
+        self.assertEqual(consistency["multipleDistinctDates"]["count"], 0)
+        largest = report["exactContent"]["largestGroups"][0]
+        self.assertEqual(largest["earliestObservedFirstCommitAt"], "2026-01-01T00:00:00.000000Z")
+        self.assertEqual(largest["latestObservedFirstCommitAt"], "2026-01-01T00:00:00.000000Z")
+
+    def test_unindexed_raw_hashes_are_excluded_from_instruction_groups(self) -> None:
+        """Unindexable raw hashes are counted separately, never pseudo-grouped."""
+        artifacts = [
+            {"file_sha": "11" * 20, "repo_full_name": "repo/a", "path": "SKILL.md", "content": None, "first_commit_at": None, "last_commit_at": None, "history_fetched": 0},
+            {"file_sha": "22" * 20, "repo_full_name": "repo/b", "path": "SKILL.md", "content": "Indexable\n", "first_commit_at": "2026-01-01T00:00:00Z", "last_commit_at": "2026-01-01T00:00:00Z", "history_fetched": 1},
+        ]
+        db_path = self.create_synthetic_db(artifacts)
+        report = run_audit(db_path)
+
+        instr = report["normalizedInstructions"]
+        self.assertEqual(report["dataset"]["distinctSkillRawHashes"], 2)
+        self.assertEqual(instr["indexedDistinctRawHashes"], 1)
+        self.assertEqual(instr["unindexedDistinctRawHashes"], 1)
+        self.assertEqual(instr["totalInstructionGroups"], 1)
+        self.assertNotIn("unindexed:", json.dumps(report))
+
+
 if __name__ == "__main__":
     unittest.main()
