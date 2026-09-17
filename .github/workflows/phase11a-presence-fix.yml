@@ -1,0 +1,32 @@
+name: Phase 11A presence semantics fix
+
+on:
+  push:
+    branches:
+      - phase-11a-historical-data-audit
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: phase-11a-historical-data-audit
+          fetch-depth: 0
+      - name: Apply presence semantics fix
+        run: python tools/_phase11a_fix_presence_semantics.py
+      - name: Commit fix and remove one-shot files
+        shell: bash
+        run: |
+          rm tools/_phase11a_fix_presence_semantics.py
+          rm .github/workflows/phase11a-presence-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/audit_gitskills_history.py tools/test_audit_gitskills_history.py tools/_phase11a_fix_presence_semantics.py .github/workflows/phase11a-presence-fix.yml
+          git commit -m "fix: separate timestamp presence from parseability"
+          git push origin HEAD:phase-11a-historical-data-audit
