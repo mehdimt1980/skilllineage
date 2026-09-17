@@ -210,6 +210,22 @@ Benchmark schema 0.2 also profiles the real retrieval pipeline: shard I/O, compr
 
 Variant retrieval is approximate. The benchmark reports exact normalized 5-token-shingle Jaccard similarity separately from sketch-estimated similarity, including recall for mutations with exact similarity at least 0.70. Aggregate diagnostics identify candidate-generation and filtering misses; optional `--details-output` records per-query diagnostics without Skill source text. Rebuild schema-0.3 and older indexes with the current builder before tracing or benchmarking.
 
+## Historical data audit (Phase 11A)
+
+Phase 11 explores incorporating historical repository metadata into lineage analysis. Before introducing historical claims or index changes, Phase 11A provides an offline, read-only audit tool to evaluate the coverage, consistency, and conflict rates of timestamps in the GitSkills database:
+
+```bash
+python tools/audit-gitskills-history.py \
+  --db /path/to/agent_skills_release.db \
+  --output history-audit.json
+```
+
+Key principles of the audit:
+
+- **Observed evidence only** — Timestamps reflect dataset observations, not proof of original authorship, fork origins, or copying direction.
+- **Strictly read-only** — The source database is opened in read-only mode and is never mutated.
+- **No runtime changes** — No historical inference or temporal ranking is exposed by `skilllineage trace` or index schemas in this phase.
+
 ## GitSkills attribution
 
 SkillLineage's offline index builder is designed to derive lineage metadata from the **GitSkills** dataset.

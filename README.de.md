@@ -209,6 +209,21 @@ Die Harness zieht deterministische Stichproben realer Skills und misst Indexgrö
 Das Benchmarkschema 0.2 profiliert zusätzlich den echten Retrieval-Pfad: Shard-I/O, komprimierte und dekomprimierte Bytes, Stage-Timings, Kandidatenentwicklung, Hinweise auf ausgelassene Hot-Anchors, deterministische Slow-Query-Zusammenfassungen sowie separates `variant_enrichment`-I/O. Die Indexgrößenmetriken erfassen außerdem rekursiv `variants/enrichment/` und dessen Shard-Größenverteilung. Dieses diagnostische Profiling verändert die Trace-Semantik nicht. Timing-Werte hängen stark von Speicher, Betriebssystem und Cache-Zustand ab; Benchmark-Ausgaben enthalten niemals Skill-Quelltext.
 
 Die Variantensuche ist approximativ. Der Benchmark meldet den exakten Jaccard-Wert normalisierter 5-Token-Shingles getrennt von der Sketch-Schätzung, einschließlich Recall für Mutationen mit einem exakten Wert von mindestens 0,70. Aggregierte Diagnosen zeigen Verluste bei Kandidatengenerierung und Filterung; `--details-output` schreibt bei Bedarf Einzeldiagnosen ohne Skill-Quelltext. Schema-0.3- und ältere Indizes müssen vor Trace oder Benchmark mit dem aktuellen Builder neu erzeugt werden.
+## Audit historischer Metadaten (Phase 11A)
+
+Phase 11 untersucht die Einbindung historischer Repository-Metadaten in die Lineage-Analyse. Bevor historische Aussagen oder Indexänderungen eingeführt werden, stellt Phase 11A ein Offline-Audit-Tool bereit, um Abdeckung, Konsistenz und Konfliktraten von Zeitstempeln in der GitSkills-Datenbank schreibgeschützt zu prüfen:
+
+```bash
+python tools/audit-gitskills-history.py \
+  --db /pfad/zu/agent_skills_release.db \
+  --output history-audit.json
+```
+
+Zentrale Prinzipien des Audits:
+
+- **Ausschließlich beobachtete Evidenz** — Zeitstempel spiegeln Datensatz-Beobachtungen wider, keine Beweise für Urheberschaft, Fork-Ursprünge oder Kopierrichtungen.
+- **Strikter Lesezugriff** — Die Quelldatenbank wird im Read-Only-Modus geöffnet und niemals verändert.
+- **Keine Laufzeitänderungen** — `skilllineage trace` und Indexschemas enthalten in dieser Phase weder historische Inferenz noch temporales Ranking.
 
 ## GitSkills-Hinweis
 
