@@ -18,6 +18,20 @@ jobs:
           ref: phase-11a-historical-data-audit
           fetch-depth: 0
 
+      - name: Correct fixer guard for nested parser indentation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('tools/_phase11a_apply_review_fixes.py')
+          s = p.read_text(encoding='utf-8')
+          old = '''count = text.count(old)\nif count != 2:\n    raise RuntimeError(f"expected two timestamp normalization sites, found {count}")\ntext = text.replace(old, new)'''
+          new = '''if old not in text:\n    raise RuntimeError("top-level timestamp normalization site not found")\ntext = text.replace(old, new, 1)\n\nold_nested = \'\'\'            if dt.tzinfo is None:\\n                dt = dt.replace(tzinfo=timezone.utc)\\n            return dt, "valid"\'\'\'\nnew_nested = \'\'\'            if dt.tzinfo is None:\\n                dt = dt.replace(tzinfo=timezone.utc)\\n            else:\\n                dt = dt.astimezone(timezone.utc)\\n            return dt, "valid"\'\'\'\ntext = replace_exact(text, old_nested, new_nested, "nested timestamp normalization")'''
+          if old not in s:
+              raise RuntimeError('fixer guard block not found')
+          p.write_text(s.replace(old, new), encoding='utf-8', newline='\n')
+          PY
+
       - name: Apply review fixes
         run: python tools/_phase11a_apply_review_fixes.py
 
