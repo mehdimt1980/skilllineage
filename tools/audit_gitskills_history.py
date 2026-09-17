@@ -675,8 +675,11 @@ def _build_report_payload(
         "SELECT COUNT(*) FROM exact_summary WHERE occ_count > 1 AND valid_first_count > 0 AND valid_first_count < occ_count;"
     ).fetchone()[0]
 
+    # Presence consistency is intentionally distinct from usable-history coverage:
+    # a non-empty but unparseable timestamp is present, even though it is not usable
+    # as historical evidence.
     multi_all_missing = temp_conn.execute(
-        "SELECT COUNT(*) FROM exact_summary WHERE occ_count > 1 AND valid_first_count = 0;"
+        "SELECT COUNT(*) FROM exact_summary WHERE occ_count > 1 AND present_first_count = 0;"
     ).fetchone()[0]
     multi_one_date = temp_conn.execute(
         "SELECT COUNT(*) FROM exact_summary WHERE occ_count > 1 AND distinct_valid_first_count = 1;"
@@ -685,7 +688,7 @@ def _build_report_payload(
         "SELECT COUNT(*) FROM exact_summary WHERE occ_count > 1 AND distinct_valid_first_count >= 2;"
     ).fetchone()[0]
     multi_mixed_missing_present = temp_conn.execute(
-        "SELECT COUNT(*) FROM exact_summary WHERE occ_count > 1 AND valid_first_count > 0 AND valid_first_count < occ_count;"
+        "SELECT COUNT(*) FROM exact_summary WHERE occ_count > 1 AND present_first_count > 0 AND present_first_count < occ_count;"
     ).fetchone()[0]
 
     # Temporal spread buckets for exact groups with >= 2 distinct valid dates

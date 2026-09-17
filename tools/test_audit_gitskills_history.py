@@ -494,5 +494,26 @@ class TestAuditHistory(BaseSyntheticDbTestCase):
         self.assertNotIn("unindexed:", json.dumps(report))
 
 
+    def test_exact_presence_consistency_is_not_parseability_coverage(self) -> None:
+        """Present-but-invalid timestamps are not mislabeled as missing dates."""
+        sha_invalid = "aa" * 20
+        sha_mixed = "bb" * 20
+        artifacts = [
+            {"file_sha": sha_invalid, "repo_full_name": "repo/a", "path": "a/SKILL.md", "content": "Same A\n", "first_commit_at": "bad-date-a", "last_commit_at": None, "history_fetched": 1},
+            {"file_sha": sha_invalid, "repo_full_name": "repo/b", "path": "b/SKILL.md", "content": "Same A\n", "first_commit_at": "bad-date-b", "last_commit_at": None, "history_fetched": 1},
+            {"file_sha": sha_mixed, "repo_full_name": "repo/c", "path": "c/SKILL.md", "content": "Same B\n", "first_commit_at": "bad-date-c", "last_commit_at": None, "history_fetched": 1},
+            {"file_sha": sha_mixed, "repo_full_name": "repo/d", "path": "d/SKILL.md", "content": "Same B\n", "first_commit_at": None, "last_commit_at": None, "history_fetched": 1},
+        ]
+        report = run_audit(self.create_synthetic_db(artifacts))
+        consistency = report["exactContent"]["multiOccurrenceAudit"]["firstCommitDateConsistency"]
+
+        # The first group has no usable timestamp, but both timestamps are present.
+        self.assertEqual(consistency["allDatesMissing"]["count"], 0)
+        # Only the second group genuinely mixes a present value with a missing value.
+        self.assertEqual(consistency["mixedMissingAndPresent"]["count"], 1)
+        # Usable-history coverage remains a separate classification: both groups have none.
+        self.assertEqual(report["exactContent"]["multiOccurrenceAudit"]["historyCoverage"]["noHistory"]["count"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()
