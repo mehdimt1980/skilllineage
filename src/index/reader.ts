@@ -171,7 +171,7 @@ export async function lookupInstructionHistory(indexDir: string, instructionsSha
 }
 
 const HISTORY_UTC_TIMESTAMP_RE =
-  /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z$/;
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
 
 function isCanonicalHistoryTimestamp(value: unknown): value is string {
   return (
