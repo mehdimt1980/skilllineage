@@ -24,7 +24,10 @@ import {
 import {
   variantEnrichmentRoute,
   variantSketchRoute,
+  exactHistoryRoute,
+  instructionHistoryRoute,
 } from "./routing.js";
+import { lookupExactHistory, lookupInstructionHistory } from "./reader.js";
 
 const execFileAsync = promisify(execFile);
 let tempDirs: string[] = [];
@@ -168,7 +171,108 @@ async function buildFixture(
   return { outDir, dbPath };
 }
 
-describe("schema 0.4 index layout", () => {
+describe("dataset-observed history summaries", () => {
+  it("distinguishes complete, none, and absent sparse records", async () => {
+    const fixture: TestFixture = {
+      repos: [{ full_name: "one/repo" }, { full_name: "two/repo" }],
+      artifacts: [
+        { file_sha: SHA_A, repo_full_name: "one/repo", path: "SKILL.md", content: BODY,
+          history_fetched: 0, first_commit_at: "2026-01-01T00:00:00Z" },
+        { file_sha: SHA_A, repo_full_name: "two/repo", path: "SKILL.md", content: BODY,
+          history_fetched: 0, first_commit_at: "2026-01-02T00:00:00Z" },
+        { file_sha: SHA_B, repo_full_name: "one/repo", path: "other/SKILL.md", content: UNRELATED,
+          history_fetched: 1 },
+        { file_sha: SHA_C, repo_full_name: "one/repo", path: "empty/SKILL.md", content: UNRELATED,
+          history_fetched: 0 },
+      ],
+    };
+    const { outDir } = await buildFixture(fixture);
+    expect(await lookupExactHistory(outDir, SHA_A)).toMatchObject({
+      totalLocationCount: 2, historyFetchedLocationCount: 0,
+      usableLocationCount: 2, coverage: "complete",
+    });
+    expect(await lookupExactHistory(outDir, SHA_B)).toMatchObject({
+      totalLocationCount: 1, historyFetchedLocationCount: 1,
+      usableLocationCount: 0, coverage: "none",
+    });
+    expect(await lookupExactHistory(outDir, SHA_C)).toBeNull();
+  });
+
+  it("deduplicates locations, excludes conflicts and anomalies, and normalizes UTC", async () => {
+    const marker = "PRIVATE-SKILL-BODY";
+    const body = `# ${marker}\none two three four five six\n`;
+    const alternate = `---\nname: alternate\n---\n${body}`;
+    const row = (sha: string, repo: string, pathName: string,
+      first: string | null, last: string | null, fetched = 1): TestArtifact => ({
+      file_sha: sha, repo_full_name: repo, path: pathName,
+      content: sha === SHA_B ? alternate : sha === SHA_C ? UNRELATED : body,
+      first_commit_at: first, last_commit_at: last, history_fetched: fetched,
+    });
+    const { outDir } = await buildFixture({
+      repos: ["a/repo", "b/repo", "c/repo", "d/repo", "e/repo", "z/repo"].map((full_name) => ({ full_name })),
+      artifacts: [
+        row(SHA_A, "a/repo", "SKILL.md", "2026-01-01T01:00:00+01:00", "2026-01-02T00:00:00Z"),
+        row(SHA_A, "a/repo", "SKILL.md", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"),
+        row(SHA_A, "b/repo", "SKILL.md", "2025-12-31T19:00:00-05:00", null),
+        row(SHA_A, "c/repo", "SKILL.md", "2026-01-03T00:00:00Z", null),
+        row(SHA_A, "c/repo", "SKILL.md", "2026-01-04T00:00:00Z", null),
+        row(SHA_A, "d/repo", "SKILL.md", "2026-02-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+        row(SHA_A, "e/repo", "SKILL.md", null, null, 0),
+        row(SHA_B, "z/repo", "SKILL.md", "2026-03-01T00:00:00Z", null),
+        row(SHA_C, "z/repo", "empty/SKILL.md", null, null, 0),
+      ],
+    });
+    const exact = await lookupExactHistory(outDir, SHA_A.toUpperCase());
+    expect(exact).toMatchObject({
+      totalLocationCount: 5, historyFetchedLocationCount: 4,
+      usableLocationCount: 2, chronologyAnomalyCount: 1,
+      conflictingLocationCount: 1, coverage: "partial",
+      earliestObserved: { repoFullName: "a/repo", firstCommitAt: "2026-01-01T00:00:00.000000Z" },
+      latestObserved: { repoFullName: "a/repo" },
+    });
+    const instruction = await lookupInstructionHistory(outDir, instrSha256(body));
+    expect(instruction).toMatchObject({
+      totalLocationCount: 6, usableLocationCount: 3,
+      earliestObserved: { repoFullName: "a/repo" },
+      latestObserved: { repoFullName: "z/repo" },
+    });
+    expect(await lookupExactHistory(outDir, SHA_C)).toBeNull();
+    const route = exactHistoryRoute(SHA_A);
+    expect(route.key).toBe("aa/00");
+    expect(instructionHistoryRoute(instrSha256(body)).key).toBe(`${instrSha256(body).slice(0, 2)}/${instrSha256(body).slice(2, 4)}`);
+    for (const file of await filesRecursively(path.join(outDir, "history"))) {
+      const bytes = await readFile(file);
+      expect(gunzipSync(bytes).toString("utf-8")).not.toContain(marker);
+      expect(bytes.readUInt32LE(4)).toBe(0);
+    }
+    const second = await buildFixture({
+      repos: ["a/repo", "b/repo", "c/repo", "d/repo", "e/repo", "z/repo"].map((full_name) => ({ full_name })),
+      artifacts: [
+        row(SHA_A, "a/repo", "SKILL.md", "2026-01-01T01:00:00+01:00", "2026-01-02T00:00:00Z"),
+        row(SHA_A, "a/repo", "SKILL.md", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"),
+        row(SHA_A, "b/repo", "SKILL.md", "2025-12-31T19:00:00-05:00", null),
+        row(SHA_A, "c/repo", "SKILL.md", "2026-01-03T00:00:00Z", null),
+        row(SHA_A, "c/repo", "SKILL.md", "2026-01-04T00:00:00Z", null),
+        row(SHA_A, "d/repo", "SKILL.md", "2026-02-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+        row(SHA_A, "e/repo", "SKILL.md", null, null, 0),
+        row(SHA_B, "z/repo", "SKILL.md", "2026-03-01T00:00:00Z", null),
+        row(SHA_C, "z/repo", "empty/SKILL.md", null, null, 0),
+      ],
+    });
+    const firstRoot = path.join(outDir, "history");
+    const secondRoot = path.join(second.outDir, "history");
+    const firstFiles = await filesRecursively(firstRoot);
+    const secondFiles = await filesRecursively(secondRoot);
+    expect(firstFiles.map((file) => path.relative(firstRoot, file))).toEqual(
+      secondFiles.map((file) => path.relative(secondRoot, file)),
+    );
+    for (let i = 0; i < firstFiles.length; i++) {
+      expect((await readFile(firstFiles[i])).equals(await readFile(secondFiles[i]))).toBe(true);
+    }
+  });
+});
+
+describe("schema 0.5 index layout", () => {
   it("keeps exact, instruction, and anchor stores at 256 two-hex shards", async () => {
     const { outDir } = await buildFixture();
     for (const relative of ["exact", "instructions", "variants/anchors"]) {
@@ -247,7 +351,7 @@ describe("schema 0.4 index layout", () => {
     });
   });
 
-  it("declares schema 0.4 and all routing algorithms", async () => {
+  it("declares schema 0.5 and all routing algorithms", async () => {
     const { outDir } = await buildFixture();
     const manifest = JSON.parse(
       await readFile(path.join(outDir, "manifest.json"), "utf-8"),
@@ -262,8 +366,15 @@ describe("schema 0.4 index layout", () => {
           exampleLimit: number;
         };
       };
+      historyIndex: {
+        algorithm: string;
+        exactRouting: string;
+        instructionRouting: string;
+        semantics: string;
+        timestampNormalization: string;
+      };
     };
-    expect(manifest.schemaVersion).toBe("0.4");
+    expect(manifest.schemaVersion).toBe("0.5");
     expect(manifest.variantIndex.anchorShardRouting).toBe(
       "sha256-anchor-hex-v1",
     );
@@ -274,6 +385,13 @@ describe("schema 0.4 index layout", () => {
       algorithm: "precomputed-variant-summary-v1",
       shardRouting: "instructions-sha256-hex4-v1",
       exampleLimit: 3,
+    });
+    expect(manifest.historyIndex).toEqual({
+      algorithm: "dataset-observed-history-v1",
+      exactRouting: "git-blob-sha1-hex4-v1",
+      instructionRouting: "instructions-sha256-hex4-v1",
+      semantics: "observed-not-origin",
+      timestampNormalization: "utc-v1",
     });
   });
 });

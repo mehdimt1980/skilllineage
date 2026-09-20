@@ -51,7 +51,7 @@ async function makeTempSkill(files: Record<string, string>): Promise<string> {
 
 function validManifest(): IndexManifest {
   return {
-    schemaVersion: "0.4",
+    schemaVersion: "0.5",
     kind: "skilllineage-exact-index",
     source: {
       name: "TestSkills",
@@ -87,6 +87,13 @@ function validManifest(): IndexManifest {
         exampleLimit: 3,
       },
       skippedHotAnchorCount: 0,
+    },
+    historyIndex: {
+      algorithm: "dataset-observed-history-v1",
+      exactRouting: "git-blob-sha1-hex4-v1",
+      instructionRouting: "instructions-sha256-hex4-v1",
+      semantics: "observed-not-origin",
+      timestampNormalization: "utc-v1",
     },
   };
 }

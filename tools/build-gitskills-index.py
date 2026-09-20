@@ -18,10 +18,11 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = "0.4"
+SCHEMA_VERSION = "0.5"
 KIND = "skilllineage-exact-index"
 SHARD_PREFIX_LENGTH = 2
 SHINGLE_SIZE = 5
@@ -58,6 +59,13 @@ def variant_enrichment_route(instructions_sha256: str):
         raise ValueError(
             f"invalid instructions SHA-256 for enrichment routing: {instructions_sha256}"
         )
+    return normalized[:2], normalized[2:4]
+
+
+def history_route(hex_hash: str, length: int):
+    normalized = hex_hash.lower()
+    if len(normalized) != length or any(ch not in "0123456789abcdef" for ch in normalized):
+        raise ValueError(f"invalid history hash: {hex_hash}")
     return normalized[:2], normalized[2:4]
 
 
@@ -215,6 +223,7 @@ def main():
     sketches_dir = out_dir / "variants" / "sketches"
     anchors_dir = out_dir / "variants" / "anchors"
     enrichment_dir = out_dir / "variants" / "enrichment"
+    history_dir = out_dir / "history"
 
     # Sparse schema namespaces must be cleared when reusing an output directory,
     # otherwise stale files from an older dataset could survive a rebuild.
@@ -222,15 +231,19 @@ def main():
         shutil.rmtree(sketches_dir)
     if enrichment_dir.exists():
         shutil.rmtree(enrichment_dir)
+    if history_dir.exists():
+        shutil.rmtree(history_dir)
 
     exact_dir.mkdir(parents=True, exist_ok=True)
     instructions_dir.mkdir(parents=True, exist_ok=True)
     sketches_dir.mkdir(parents=True, exist_ok=True)
     anchors_dir.mkdir(parents=True, exist_ok=True)
     enrichment_dir.mkdir(parents=True, exist_ok=True)
+    history_dir.mkdir(parents=True, exist_ok=True)
 
     conn = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA query_only=ON")
 
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db", prefix="skilllineage-build-")
     os.close(tmp_fd)
@@ -243,6 +256,7 @@ def main():
             sketches_dir,
             anchors_dir,
             enrichment_dir,
+            history_dir,
             tmp_path,
         )
     finally:
@@ -292,6 +306,13 @@ def main():
                 "exampleLimit": ENRICHMENT_EXAMPLE_LIMIT,
             },
             "skippedHotAnchorCount": skipped_hot_anchor_count,
+        },
+        "historyIndex": {
+            "algorithm": "dataset-observed-history-v1",
+            "exactRouting": "git-blob-sha1-hex4-v1",
+            "instructionRouting": "instructions-sha256-hex4-v1",
+            "semantics": "observed-not-origin",
+            "timestampNormalization": "utc-v1",
         },
     }
 
@@ -430,9 +451,10 @@ def build_instruction_index(
     sketches_dir: Path,
     anchors_dir: Path,
     enrichment_dir: Path,
+    history_dir: Path,
     tmp_db_path: str,
 ):
-    tmp_conn = sqlite3.connect(tmp_db_path)
+    tmp_conn = sqlite3.connect(tmp_db_path, uri=True)
     try:
         return _populate_instruction_index(
             conn,
@@ -440,6 +462,7 @@ def build_instruction_index(
             sketches_dir,
             anchors_dir,
             enrichment_dir,
+            history_dir,
             tmp_conn,
         )
     finally:
@@ -452,6 +475,7 @@ def _populate_instruction_index(
     sketches_dir: Path,
     anchors_dir: Path,
     enrichment_dir: Path,
+    history_dir: Path,
     tmp_conn,
 ):
     tmp_conn.execute("PRAGMA temp_store = FILE")
@@ -584,6 +608,7 @@ def _populate_instruction_index(
     _write_variant_sketches(tmp_conn, sketches_dir)
     skipped_hot_anchor_count = _write_variant_anchors(tmp_conn, anchors_dir)
     _write_variant_enrichment(conn, tmp_conn, enrichment_dir)
+    _write_history(conn, tmp_conn, history_dir)
 
     return indexed_count, skipped_count, skipped_hot_anchor_count
 
@@ -674,7 +699,7 @@ def _write_variant_enrichment(conn, tmp_conn, enrichment_dir: Path) -> None:
         ) WITHOUT ROWID
     """)
 
-    tmp_conn.execute("ATTACH DATABASE ? AS source_db", (source_path,))
+    tmp_conn.execute("ATTACH DATABASE ? AS source_db", (Path(source_path).resolve().as_uri() + "?mode=ro",))
     try:
         tmp_conn.execute("""
             INSERT OR IGNORE INTO enrichment_occurrences
@@ -781,6 +806,165 @@ def _write_variant_enrichment(conn, tmp_conn, enrichment_dir: Path) -> None:
             enrichment_dir / current_route[0] / f"{current_route[1]}.json.gz",
             current_shard,
         )
+
+
+def _utc_timestamp(value):
+    """Parse source timestamps once and serialize comparable UTC microseconds."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return None
+        return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+    except ValueError:
+        return None
+
+
+def _history_summary():
+    return {
+        "totalLocationCount": 0,
+        "historyFetchedLocationCount": 0,
+        "usableLocationCount": 0,
+        "chronologyAnomalyCount": 0,
+        "conflictingLocationCount": 0,
+        "coverage": "none",
+        "earliestObserved": None,
+        "latestObserved": None,
+    }
+
+
+def _finish_history_summary(summary):
+    total = summary["totalLocationCount"]
+    usable = summary["usableLocationCount"]
+    summary["coverage"] = (
+        "none" if usable == 0 else "complete" if usable == total else "partial"
+    )
+    return summary
+
+
+def _write_history(conn, tmp_conn, history_dir: Path) -> None:
+    """Stage location observations on disk, then stream deterministic summaries."""
+    source_row = conn.execute("PRAGMA database_list").fetchone()
+    source_path = source_row[2] if source_row is not None else None
+    if not source_path:
+        raise RuntimeError("could not resolve read-only source database for history")
+    tmp_conn.execute("""
+        CREATE TABLE history_occurrences (
+            kind TEXT NOT NULL,
+            group_hash TEXT NOT NULL,
+            repo_full_name TEXT NOT NULL,
+            path TEXT NOT NULL,
+            fetched INTEGER NOT NULL,
+            first_at TEXT,
+            last_at TEXT,
+            anomaly INTEGER NOT NULL
+        )
+    """)
+    tmp_conn.execute("ATTACH DATABASE ? AS source_db", (Path(source_path).resolve().as_uri() + "?mode=ro",))
+    try:
+        rows = tmp_conn.execute("""
+            SELECT LOWER(a.file_sha), im.instruction_sha256,
+                   a.repo_full_name, a.path, a.history_fetched,
+                   a.first_commit_at, a.last_commit_at
+            FROM source_db.artifacts a
+            LEFT JOIN instr_map im ON im.file_sha = LOWER(a.file_sha)
+            WHERE (a.path GLOB '*/SKILL.md' OR a.path = 'SKILL.md')
+              AND a.file_sha IS NOT NULL
+              AND a.repo_full_name IS NOT NULL AND a.path IS NOT NULL
+        """)
+        batch = []
+        for file_sha, instr_sha, repo, location_path, fetched, first_raw, last_raw in rows:
+            if len(file_sha) != 40 or any(ch not in "0123456789abcdef" for ch in file_sha):
+                continue
+            first_at = _utc_timestamp(first_raw)
+            last_at = _utc_timestamp(last_raw)
+            anomaly = int(first_at is not None and last_at is not None and first_at > last_at)
+            observation = (repo, location_path, int(bool(fetched)), first_at, last_at, anomaly)
+            batch.append(("exact", file_sha, *observation))
+            if instr_sha is not None:
+                batch.append(("instructions", instr_sha, *observation))
+            if len(batch) >= 2000:
+                tmp_conn.executemany("INSERT INTO history_occurrences VALUES (?,?,?,?,?,?,?,?)", batch)
+                batch.clear()
+        if batch:
+            tmp_conn.executemany("INSERT INTO history_occurrences VALUES (?,?,?,?,?,?,?,?)", batch)
+        tmp_conn.commit()
+    finally:
+        tmp_conn.execute("DETACH DATABASE source_db")
+
+    tmp_conn.execute("""
+        CREATE INDEX history_location_idx ON history_occurrences
+        (kind, group_hash, repo_full_name, path)
+    """)
+    tmp_conn.commit()
+    rows = tmp_conn.execute("""
+        SELECT kind, group_hash, repo_full_name, path,
+               MAX(fetched), MAX(anomaly),
+               MIN(CASE WHEN anomaly = 0 THEN first_at END),
+               MAX(CASE WHEN anomaly = 0 THEN first_at END),
+               MIN(CASE WHEN anomaly = 0 THEN last_at END),
+               MAX(CASE WHEN anomaly = 0 THEN last_at END)
+        FROM history_occurrences
+        GROUP BY kind, group_hash, repo_full_name, path
+        ORDER BY kind, group_hash, repo_full_name, path
+    """)
+    current_group = None
+    current_route = None
+    shard = {}
+    summary = None
+
+    def flush_group():
+        nonlocal shard, current_route
+        if current_group is None or summary is None:
+            return
+        if not (summary["historyFetchedLocationCount"] or summary["usableLocationCount"]
+                or summary["chronologyAnomalyCount"] or summary["conflictingLocationCount"]):
+            return
+        kind, group_hash = current_group
+        route = history_route(group_hash, 40 if kind == "exact" else 64)
+        physical = (kind, *route)
+        if current_route is not None and physical != current_route:
+            write_gz_shard(history_dir / current_route[0] / current_route[1]
+                           / f"{current_route[2]}.json.gz", shard)
+            shard = {}
+        current_route = physical
+        shard[group_hash] = _finish_history_summary(summary)
+
+    for kind, group_hash, repo, location_path, fetched, anomaly, first_min, first_max, last_min, last_max in rows:
+        group = (kind, group_hash)
+        if group != current_group:
+            flush_group()
+            current_group = group
+            summary = _history_summary()
+        summary["totalLocationCount"] += 1
+        summary["historyFetchedLocationCount"] += fetched
+        conflicting = first_min != first_max or last_min != last_max
+        if conflicting:
+            summary["conflictingLocationCount"] += 1
+        if anomaly:
+            summary["chronologyAnomalyCount"] += 1
+        if not conflicting and not anomaly and first_min is not None:
+            summary["usableLocationCount"] += 1
+            observed = {
+                "repoFullName": repo, "path": location_path,
+                "firstCommitAt": first_min, "lastCommitAt": last_max,
+            }
+            earliest = summary["earliestObserved"]
+            latest = summary["latestObserved"]
+            if earliest is None or (first_min, repo, location_path) < (
+                earliest["firstCommitAt"], earliest["repoFullName"], earliest["path"]
+            ):
+                summary["earliestObserved"] = observed
+            if latest is None or first_min > latest["firstCommitAt"] or (
+                first_min == latest["firstCommitAt"]
+                and (repo, location_path) < (latest["repoFullName"], latest["path"])
+            ):
+                summary["latestObserved"] = observed
+    flush_group()
+    if current_route is not None:
+        write_gz_shard(history_dir / current_route[0] / current_route[1]
+                       / f"{current_route[2]}.json.gz", shard)
 
 
 def _write_missing_shards(shards_dir: Path) -> None:

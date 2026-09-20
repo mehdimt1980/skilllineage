@@ -11,10 +11,16 @@ import type {
   SketchShard,
   AnchorShard,
   VariantEnrichmentShard,
+  HistoryShard,
+  HistorySummaryRecord,
 } from "./types.js";
 import {
   VARIANT_ENRICHMENT_SHARD_ROUTING,
   VARIANT_SKETCH_SHARD_ROUTING,
+  EXACT_HISTORY_SHARD_ROUTING,
+  INSTRUCTION_HISTORY_SHARD_ROUTING,
+  exactHistoryRoute,
+  instructionHistoryRoute,
 } from "./routing.js";
 
 // ---------------------------------------------------------------------------
@@ -33,7 +39,9 @@ export type ShardKind =
   | "instructions"
   | "variant_anchor"
   | "variant_sketch"
-  | "variant_enrichment";
+  | "variant_enrichment"
+  | "history_exact"
+  | "history_instructions";
 export interface ShardReadEvent { shardKind: ShardKind; prefix: string; compressedBytes: number; decompressedBytes: number; readMs: number; gunzipMs: number; parseMs: number; totalMs: number; }
 export type ShardReadObserver = (event: ShardReadEvent) => void;
 
@@ -75,7 +83,7 @@ export async function readManifest(indexDir: string): Promise<IndexManifest> {
     );
   }
 
-  if (m.schemaVersion !== "0.4") {
+  if (m.schemaVersion !== "0.5") {
     throw new IndexError(
       `Unsupported schema version: ${String(m.schemaVersion)}. Rebuild the index with the current builder.`,
     );
@@ -106,7 +114,85 @@ export async function readManifest(indexDir: string): Promise<IndexManifest> {
     throw new IndexError(`Unsupported variant index parameters or shard routing: ${manifestPath}. Rebuild the index with the current builder.`);
   }
 
+  if (!isCompatibleHistoryIndex(m.historyIndex)) {
+    throw new IndexError(`Unsupported history index descriptor: ${manifestPath}. Rebuild the index with the current builder.`);
+  }
+
   return manifest as IndexManifest;
+}
+
+function isCompatibleHistoryIndex(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const h = value as Record<string, unknown>;
+  return h.algorithm === "dataset-observed-history-v1" &&
+    h.exactRouting === EXACT_HISTORY_SHARD_ROUTING &&
+    h.instructionRouting === INSTRUCTION_HISTORY_SHARD_ROUTING &&
+    h.semantics === "observed-not-origin" &&
+    h.timestampNormalization === "utc-v1";
+}
+
+/** Sparse history shards contain observed dataset metadata, never origin claims. */
+export async function readHistoryShard(
+  indexDir: string,
+  kind: "exact" | "instructions",
+  routeKey: string,
+): Promise<HistoryShard> {
+  const normalized = routeKey.toLowerCase();
+  if (!/^[0-9a-f]{2}\/[0-9a-f]{2}$/.test(normalized)) {
+    throw new IndexError(`Invalid history route: ${routeKey}`);
+  }
+  const [directory, file] = normalized.split("/");
+  const shard = await readGzipShard(
+    path.join(indexDir, "history", kind, directory, `${file}.json.gz`),
+    kind === "exact" ? "history_exact" : "history_instructions",
+    normalized, undefined, true,
+  );
+  for (const [hash, value] of Object.entries(shard)) {
+    if (!new RegExp(`^[0-9a-f]{${kind === "exact" ? 40 : 64}}$`).test(hash) ||
+        hash.slice(0, 4) !== directory + file || !isHistorySummary(value)) {
+      throw new IndexError(`Invalid history summary at route ${normalized}`);
+    }
+  }
+  return shard as HistoryShard;
+}
+
+export async function lookupExactHistory(indexDir: string, blobSha1: string): Promise<HistorySummaryRecord | null> {
+  const route = exactHistoryRoute(blobSha1);
+  const shard = await readHistoryShard(indexDir, "exact", route.key);
+  return Object.prototype.hasOwnProperty.call(shard, blobSha1.toLowerCase())
+    ? shard[blobSha1.toLowerCase()] : null;
+}
+
+export async function lookupInstructionHistory(indexDir: string, instructionsSha256: string): Promise<HistorySummaryRecord | null> {
+  const route = instructionHistoryRoute(instructionsSha256);
+  const shard = await readHistoryShard(indexDir, "instructions", route.key);
+  return Object.prototype.hasOwnProperty.call(shard, instructionsSha256.toLowerCase())
+    ? shard[instructionsSha256.toLowerCase()] : null;
+}
+
+function isHistorySummary(value: unknown): value is HistorySummaryRecord {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const s = value as Record<string, unknown>;
+  const counts = [s.totalLocationCount, s.historyFetchedLocationCount,
+    s.usableLocationCount, s.chronologyAnomalyCount, s.conflictingLocationCount];
+  if (counts.some((n) => !Number.isInteger(n) || (n as number) < 0) ||
+      (s.totalLocationCount as number) < 1 ||
+      counts.slice(1).some((n) => (n as number) > (s.totalLocationCount as number))) return false;
+  const coverage = s.usableLocationCount === 0 ? "none" :
+    s.usableLocationCount === s.totalLocationCount ? "complete" : "partial";
+  if (s.coverage !== coverage) return false;
+  for (const key of ["earliestObserved", "latestObserved"]) {
+    const o = s[key];
+    if (o === null) continue;
+    if (typeof o !== "object" || Array.isArray(o)) return false;
+    const obs = o as Record<string, unknown>;
+    if (typeof obs.repoFullName !== "string" || typeof obs.path !== "string" ||
+        typeof obs.firstCommitAt !== "string" ||
+        !(obs.lastCommitAt === null || typeof obs.lastCommitAt === "string")) return false;
+  }
+  return s.usableLocationCount === 0
+    ? s.earliestObserved === null && s.latestObserved === null
+    : s.earliestObserved !== null && s.latestObserved !== null;
 }
 
 function isCompatibleVariantIndex(value: unknown): boolean {

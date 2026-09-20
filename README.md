@@ -183,7 +183,13 @@ At trace time, variant candidates no longer reconstruct these summaries by readi
 
 The matching algorithm is unchanged: normalization, 5-token shingles, bottom-32 sketching, anchor generation, estimated similarity, thresholds, caps, ranking, and trace precedence are unchanged. Schema 0.4 is an index/runtime I/O optimization; it does not introduce historical origin inference or change similarity semantics.
 
-Schema-0.3 and older indexes are not compatible with the schema-0.4 reader and must be rebuilt with the current builder.
+Schema-0.3 and older indexes are not compatible with the schema-0.4 reader.
+
+## Index schema 0.5: observed history foundation
+
+Schema 0.5 adds sparse `history/exact/aa/bb.json.gz` and `history/instructions/aa/bb.json.gz` micro-shards, routed by the first four hex characters of the lowercase Git blob SHA-1 and full normalized-instructions SHA-256 respectively. Summaries count distinct repository/path locations, fetched history, usable timestamps, chronology anomalies, and conflicting duplicate locations. They record deterministic earliest and latest **dataset observations** in UTC and classify indexed-location coverage as `none`, `partial`, or `complete`.
+
+These timestamps do not establish origin, authorship, or copying direction. Historical coverage in GitSkills is incomplete. The summaries are available through internal read-only APIs but are not included in normal `trace` output. Phase 11C will decide how to present them. Schema-0.4 indexes must be rebuilt for the schema-0.5 reader; the matching and ranking algorithms remain unchanged.
 
 ## Continuous Integration
 
