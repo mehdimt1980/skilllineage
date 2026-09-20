@@ -170,29 +170,84 @@ export async function lookupInstructionHistory(indexDir: string, instructionsSha
     ? shard[instructionsSha256.toLowerCase()] : null;
 }
 
-function isHistorySummary(value: unknown): value is HistorySummaryRecord {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const s = value as Record<string, unknown>;
-  const counts = [s.totalLocationCount, s.historyFetchedLocationCount,
-    s.usableLocationCount, s.chronologyAnomalyCount, s.conflictingLocationCount];
-  if (counts.some((n) => !Number.isInteger(n) || (n as number) < 0) ||
-      (s.totalLocationCount as number) < 1 ||
-      counts.slice(1).some((n) => (n as number) > (s.totalLocationCount as number))) return false;
-  const coverage = s.usableLocationCount === 0 ? "none" :
-    s.usableLocationCount === s.totalLocationCount ? "complete" : "partial";
-  if (s.coverage !== coverage) return false;
-  for (const key of ["earliestObserved", "latestObserved"]) {
-    const o = s[key];
-    if (o === null) continue;
-    if (typeof o !== "object" || Array.isArray(o)) return false;
-    const obs = o as Record<string, unknown>;
-    if (typeof obs.repoFullName !== "string" || typeof obs.path !== "string" ||
-        typeof obs.firstCommitAt !== "string" ||
-        !(obs.lastCommitAt === null || typeof obs.lastCommitAt === "string")) return false;
+const HISTORY_UTC_TIMESTAMP_RE =
+  /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z$/;
+
+function isCanonicalHistoryTimestamp(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    HISTORY_UTC_TIMESTAMP_RE.test(value) &&
+    !Number.isNaN(Date.parse(value))
+  );
+}
+
+function isHistoryObservation(value: unknown): value is HistorySummaryRecord["earliestObserved"] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
   }
-  return s.usableLocationCount === 0
-    ? s.earliestObserved === null && s.latestObserved === null
-    : s.earliestObserved !== null && s.latestObserved !== null;
+  const obs = value as Record<string, unknown>;
+  if (
+    typeof obs.repoFullName !== "string" ||
+    typeof obs.path !== "string" ||
+    !isCanonicalHistoryTimestamp(obs.firstCommitAt) ||
+    !(
+      obs.lastCommitAt === null ||
+      isCanonicalHistoryTimestamp(obs.lastCommitAt)
+    )
+  ) {
+    return false;
+  }
+  return (
+    obs.lastCommitAt === null ||
+    (obs.lastCommitAt as string) >= (obs.firstCommitAt as string)
+  );
+}
+
+function isHistorySummary(value: unknown): value is HistorySummaryRecord {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const s = value as Record<string, unknown>;
+  const total = s.totalLocationCount;
+  const fetched = s.historyFetchedLocationCount;
+  const usable = s.usableLocationCount;
+  const chronology = s.chronologyAnomalyCount;
+  const conflicts = s.conflictingLocationCount;
+  const counts = [total, fetched, usable, chronology, conflicts];
+
+  if (
+    counts.some((n) => !Number.isInteger(n) || (n as number) < 0) ||
+    (total as number) < 1 ||
+    [fetched, usable, chronology, conflicts].some(
+      (n) => (n as number) > (total as number),
+    ) ||
+    (usable as number) + (chronology as number) > (total as number) ||
+    (usable as number) + (conflicts as number) > (total as number)
+  ) {
+    return false;
+  }
+
+  const coverage =
+    usable === 0
+      ? "none"
+      : usable === total && chronology === 0 && conflicts === 0
+        ? "complete"
+        : "partial";
+  if (s.coverage !== coverage) return false;
+
+  if (usable === 0) {
+    return s.earliestObserved === null && s.latestObserved === null;
+  }
+
+  if (
+    !isHistoryObservation(s.earliestObserved) ||
+    !isHistoryObservation(s.latestObserved)
+  ) {
+    return false;
+  }
+
+  return s.earliestObserved.firstCommitAt <= s.latestObserved.firstCommitAt;
 }
 
 function isCompatibleVariantIndex(value: unknown): boolean {
