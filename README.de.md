@@ -107,12 +107,13 @@ Implementiert:
 - [x] Full-Scale-Retrieval-Profiling
 - [x] Schema-0.3-Microsharding für Variant-Sketches
 - [x] Schema-0.4 mit vorab berechneten Variant-Enrichment-Summaries
+- [x] Schema-0.5 mit Summaries historischer Datensatz-Beobachtungen
+- [x] Trace-Schema 0.2 mit nutzerseitig sichtbarer beobachteter Historien-Evidenz
 
 Geplant:
 
 - [ ] parameterbezogene Optimierung anhand realer Benchmark-Ergebnisse
-- [ ] reichhaltigere Lineage-Evidenz anhand der Repository-Historie
-- [ ] Origin-Inference mit expliziten Confidence- und Evidenzregeln
+- [ ] Origin-Inference nur, falls zukünftige Evidenzregeln sie ausdrücklich tragen können
 
 ## Entwicklung
 
