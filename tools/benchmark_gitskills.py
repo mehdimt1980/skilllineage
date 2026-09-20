@@ -523,11 +523,15 @@ def build_report(
                 "none": latency_summary([item["durationMs"] for item in by_category["none"]]),
             },
             "profiling": {
+                "exact": profiling_summary(by_category["exact"]),
+                "sameInstructions": profiling_summary(by_category["same_instructions"]),
                 "variantLight": profiling_summary(by_category["variant_light"]),
                 "variantMedium": profiling_summary(by_category["variant_medium"]),
                 "none": profiling_summary(by_category["none"]),
             },
             "slowQueries": {
+                "exact": slow_queries(by_category["exact"]),
+                "sameInstructions": slow_queries(by_category["same_instructions"]),
                 "variantLight": slow_queries(by_category["variant_light"]),
                 "variantMedium": slow_queries(by_category["variant_medium"]),
                 "none": slow_queries(by_category["none"]),
