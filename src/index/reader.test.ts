@@ -14,6 +14,9 @@ import {
   lookupInstructions,
   shardPrefix,
   IndexError,
+  lookupExactHistory,
+  lookupInstructionHistory,
+  readHistoryShard,
 } from "./reader.js";
 import type {
   IndexManifest,
@@ -35,7 +38,7 @@ function validManifest(
   overrides: Partial<Record<string, unknown>> = {},
 ): IndexManifest {
   return {
-    schemaVersion: "0.4",
+    schemaVersion: "0.5",
     kind: "skilllineage-exact-index",
     source: {
       name: "TestSkills",
@@ -71,6 +74,13 @@ function validManifest(
         exampleLimit: 3,
       },
       skippedHotAnchorCount: 0,
+    },
+    historyIndex: {
+      algorithm: "dataset-observed-history-v1",
+      exactRouting: "git-blob-sha1-hex4-v1",
+      instructionRouting: "instructions-sha256-hex4-v1",
+      semantics: "observed-not-origin",
+      timestampNormalization: "utc-v1",
     },
     ...overrides,
   };
@@ -137,6 +147,108 @@ beforeEach(() => {
   tempDirs = [];
 });
 
+describe("sparse history reader", () => {
+  const exactHash = "a1b2" + "a".repeat(36);
+  const instructionHash = "a1b2" + "b".repeat(60);
+
+  it("returns null when no historical shard exists", async () => {
+    const dir = await makeTempDir();
+    expect(await lookupExactHistory(dir, exactHash)).toBeNull();
+    expect(await lookupInstructionHistory(dir, instructionHash)).toBeNull();
+  });
+
+  it("reads a valid summary and rejects malformed existing shards", async () => {
+    const dir = await makeTempDir();
+    const folder = path.join(dir, "history", "exact", "a1");
+    await mkdir(folder, { recursive: true });
+    const file = path.join(folder, "b2.json.gz");
+    const summary = {
+      totalLocationCount: 1, historyFetchedLocationCount: 1,
+      usableLocationCount: 0, chronologyAnomalyCount: 0,
+      conflictingLocationCount: 0, coverage: "none",
+      earliestObserved: null, latestObserved: null,
+    };
+    await writeFile(file, gzipSync(Buffer.from(JSON.stringify({ [exactHash]: summary }))));
+    expect(await lookupExactHistory(dir, exactHash.toUpperCase())).toEqual(summary);
+    await writeFile(file, gzipSync(Buffer.from(JSON.stringify({ [exactHash]: { ...summary, coverage: "complete" } }))));
+    await expect(readHistoryShard(dir, "exact", "a1/b2")).rejects.toThrow("Invalid history summary");
+    await writeFile(file, gzipSync(Buffer.from("not-json")));
+    await expect(lookupExactHistory(dir, exactHash)).rejects.toThrow("Malformed shard JSON");
+  });
+
+  it("rejects impossible counts and non-canonical historical observations", async () => {
+    const dir = await makeTempDir();
+    const folder = path.join(dir, "history", "exact", "a1");
+    await mkdir(folder, { recursive: true });
+    const file = path.join(folder, "b2.json.gz");
+    const observation = {
+      repoFullName: "owner/repo",
+      path: "SKILL.md",
+      firstCommitAt: "2026-01-01T00:00:00.000000Z",
+      lastCommitAt: "2026-01-02T00:00:00.000000Z",
+    };
+    const valid = {
+      totalLocationCount: 2,
+      historyFetchedLocationCount: 2,
+      usableLocationCount: 2,
+      chronologyAnomalyCount: 0,
+      conflictingLocationCount: 0,
+      coverage: "complete",
+      earliestObserved: observation,
+      latestObserved: observation,
+    };
+
+    const invalidRecords = [
+      { ...valid, chronologyAnomalyCount: 1 },
+      { ...valid, conflictingLocationCount: 1 },
+      {
+        ...valid,
+        earliestObserved: {
+          ...observation,
+          firstCommitAt: "2026-01-01T01:00:00+01:00",
+        },
+      },
+      {
+        ...valid,
+        earliestObserved: {
+          ...observation,
+          lastCommitAt: "2025-12-31T23:59:59.000000Z",
+        },
+      },
+      {
+        ...valid,
+        earliestObserved: {
+          ...observation,
+          firstCommitAt: "2026-02-01T00:00:00.000000Z",
+          lastCommitAt: null,
+        },
+        latestObserved: {
+          ...observation,
+          firstCommitAt: "2026-01-01T00:00:00.000000Z",
+          lastCommitAt: null,
+        },
+      },
+      {
+        ...valid,
+        totalLocationCount: 3,
+        usableLocationCount: 2,
+        chronologyAnomalyCount: 2,
+        coverage: "partial",
+      },
+    ];
+
+    for (const record of invalidRecords) {
+      await writeFile(
+        file,
+        gzipSync(Buffer.from(JSON.stringify({ [exactHash]: record }))),
+      );
+      await expect(readHistoryShard(dir, "exact", "a1/b2")).rejects.toThrow(
+        "Invalid history summary",
+      );
+    }
+  });
+});
+
 afterEach(async () => {
   for (const d of tempDirs) {
     await rm(d, { recursive: true, force: true });
@@ -154,7 +266,7 @@ describe("shardPrefix", () => {
 });
 
 describe("readManifest", () => {
-  it("reads a valid schema-0.4 manifest", async () => {
+  it("reads a valid schema-0.5 manifest", async () => {
     const dir = await makeTempDir();
     const manifest = validManifest();
     await writeManifest(dir, manifest);

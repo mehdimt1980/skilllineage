@@ -9,12 +9,19 @@ export {
   readAnchorShard,
   shardPrefix,
   IndexError,
+  lookupExactHistory,
+  lookupInstructionHistory,
+  readHistoryShard,
 } from "./reader.js";
 export {
   VARIANT_SKETCH_SHARD_ROUTING,
   VARIANT_ENRICHMENT_SHARD_ROUTING,
   variantSketchRoute,
   variantEnrichmentRoute,
+  exactHistoryRoute,
+  instructionHistoryRoute,
+  EXACT_HISTORY_SHARD_ROUTING,
+  INSTRUCTION_HISTORY_SHARD_ROUTING,
 } from "./routing.js";
 export type {
   VariantSketchRoute,
@@ -37,6 +44,10 @@ export type {
   VariantEnrichmentExample,
   VariantEnrichmentRecord,
   VariantEnrichmentShard,
+  HistoryIndexDescriptor,
+  HistoryObservation,
+  HistorySummaryRecord,
+  HistoryShard,
   SketchShard,
   AnchorShard,
 } from "./types.js";

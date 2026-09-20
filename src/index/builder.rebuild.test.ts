@@ -17,7 +17,7 @@ afterEach(async () => {
   }
 });
 
-describe("schema 0.4 sparse-namespace rebuild hygiene", () => {
+describe("schema 0.5 sparse-namespace rebuild hygiene", () => {
   it("removes obsolete sketch and stale enrichment shards without deleting other namespaces", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "skilllineage-rebuild-"));
     tempDirs.push(root);
@@ -27,6 +27,7 @@ describe("schema 0.4 sparse-namespace rebuild hygiene", () => {
     const sketchRoot = path.join(outDir, "variants", "sketches");
     const enrichmentRoot = path.join(outDir, "variants", "enrichment");
     const unrelatedRoot = path.join(outDir, "variants", "anchors");
+    const historyRoot = path.join(outDir, "history");
 
     await writeFile(
       fixturePath,
@@ -62,6 +63,8 @@ describe("schema 0.4 sparse-namespace rebuild hygiene", () => {
       "stale-enrichment-layout",
       "utf-8",
     );
+    await mkdir(path.join(historyRoot, "exact", "fe"), { recursive: true });
+    await writeFile(path.join(historyRoot, "exact", "fe", "ed.json.gz"), "stale-history");
     await mkdir(unrelatedRoot, { recursive: true });
     await writeFile(
       path.join(unrelatedRoot, "sentinel.txt"),
@@ -84,6 +87,7 @@ describe("schema 0.4 sparse-namespace rebuild hygiene", () => {
     await expect(
       readFile(path.join(enrichmentRoot, "fe", "ed.json.gz")),
     ).rejects.toThrow();
+    await expect(readFile(path.join(historyRoot, "exact", "fe", "ed.json.gz"))).rejects.toThrow();
     expect(await readFile(path.join(unrelatedRoot, "sentinel.txt"), "utf-8")).toBe(
       "must-survive",
     );
@@ -97,7 +101,7 @@ describe("schema 0.4 sparse-namespace rebuild hygiene", () => {
         enrichment: { shardRouting: string };
       };
     };
-    expect(manifest.schemaVersion).toBe("0.4");
+    expect(manifest.schemaVersion).toBe("0.5");
     expect(manifest.variantIndex.sketchShardRouting).toBe(
       "variant-id-hex4-v1",
     );

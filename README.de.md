@@ -183,7 +183,13 @@ Zur Trace-Zeit werden diese Summaries nicht mehr durch das Lesen von Instruction
 
 Der Matching-Algorithmus bleibt unverändert: Normalisierung, 5-Token-Shingles, Bottom-32-Sketch, Anchor-Generierung, geschätzte Similarity, Schwellenwerte, Caps, Ranking und Trace-Priorität ändern sich nicht. Schema 0.4 ist eine Index-/Runtime-I/O-Optimierung; es führt keine historische Origin-Inference ein und verändert die Similarity-Semantik nicht.
 
-Schema-0.3- und ältere Indizes sind nicht mit dem Schema-0.4-Reader kompatibel und müssen mit dem aktuellen Builder neu erzeugt werden.
+Schema-0.3- und ältere Indizes sind nicht mit dem Schema-0.4-Reader kompatibel.
+
+## Indexschema 0.5: Grundlage für beobachtete Historie
+
+Schema 0.5 ergänzt sparse Microshards unter `history/exact/aa/bb.json.gz` und `history/instructions/aa/bb.json.gz`. Das Routing verwendet die ersten vier Hex-Zeichen des kleingeschriebenen Git-Blob-SHA-1 beziehungsweise des vollständigen SHA-256 der normalisierten Instructions. Die Summaries zählen eindeutige Repository-/Pfad-Orte, abgerufene Historie, nutzbare Zeitstempel, Chronologie-Anomalien und widersprüchliche Duplikate. Früheste und späteste **Beobachtungen im Datensatz** werden deterministisch in UTC gespeichert. `none`, `partial` und `complete` beschreiben nur die Abdeckung der indexierten Orte.
+
+Diese Zeitstempel belegen weder Ursprung noch Urheberschaft oder Kopierrichtung. Die historische Abdeckung in GitSkills ist unvollständig. Interne, schreibgeschützte APIs können die Summaries lesen; die normale `trace`-Ausgabe enthält sie noch nicht. Phase 11C entscheidet über ihre Darstellung. Schema-0.4-Indizes müssen für den Schema-0.5-Reader neu erzeugt werden; Matching und Ranking bleiben unverändert.
 
 ## Continuous Integration
 

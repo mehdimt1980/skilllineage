@@ -5,6 +5,8 @@ import {
   VARIANT_SKETCH_SHARD_ROUTING,
   variantEnrichmentRoute,
   variantSketchRoute,
+  exactHistoryRoute,
+  instructionHistoryRoute,
 } from "./routing.js";
 
 describe("variantSketchRoute", () => {
@@ -28,6 +30,18 @@ describe("variantSketchRoute", () => {
 
   it("keeps the Phase 10C sketch routing identifier unchanged", () => {
     expect(VARIANT_SKETCH_SHARD_ROUTING).toBe("variant-id-hex4-v1");
+  });
+});
+
+describe("history routing", () => {
+  it("routes full hashes by four lowercase hex characters", () => {
+    expect(exactHistoryRoute("A1B2" + "f".repeat(36)).key).toBe("a1/b2");
+    expect(instructionHistoryRoute("A1B2" + "f".repeat(60)).key).toBe("a1/b2");
+  });
+
+  it("rejects malformed hashes", () => {
+    expect(() => exactHistoryRoute("a1b2")).toThrow("Invalid blob SHA-1");
+    expect(() => instructionHistoryRoute("z".repeat(64))).toThrow("Invalid instructions SHA-256");
   });
 });
 

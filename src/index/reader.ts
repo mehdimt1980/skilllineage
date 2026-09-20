@@ -11,10 +11,16 @@ import type {
   SketchShard,
   AnchorShard,
   VariantEnrichmentShard,
+  HistoryShard,
+  HistorySummaryRecord,
 } from "./types.js";
 import {
   VARIANT_ENRICHMENT_SHARD_ROUTING,
   VARIANT_SKETCH_SHARD_ROUTING,
+  EXACT_HISTORY_SHARD_ROUTING,
+  INSTRUCTION_HISTORY_SHARD_ROUTING,
+  exactHistoryRoute,
+  instructionHistoryRoute,
 } from "./routing.js";
 
 // ---------------------------------------------------------------------------
@@ -33,7 +39,9 @@ export type ShardKind =
   | "instructions"
   | "variant_anchor"
   | "variant_sketch"
-  | "variant_enrichment";
+  | "variant_enrichment"
+  | "history_exact"
+  | "history_instructions";
 export interface ShardReadEvent { shardKind: ShardKind; prefix: string; compressedBytes: number; decompressedBytes: number; readMs: number; gunzipMs: number; parseMs: number; totalMs: number; }
 export type ShardReadObserver = (event: ShardReadEvent) => void;
 
@@ -75,7 +83,7 @@ export async function readManifest(indexDir: string): Promise<IndexManifest> {
     );
   }
 
-  if (m.schemaVersion !== "0.4") {
+  if (m.schemaVersion !== "0.5") {
     throw new IndexError(
       `Unsupported schema version: ${String(m.schemaVersion)}. Rebuild the index with the current builder.`,
     );
@@ -106,7 +114,141 @@ export async function readManifest(indexDir: string): Promise<IndexManifest> {
     throw new IndexError(`Unsupported variant index parameters or shard routing: ${manifestPath}. Rebuild the index with the current builder.`);
   }
 
+  if (!isCompatibleHistoryIndex(m.historyIndex)) {
+    throw new IndexError(`Unsupported history index descriptor: ${manifestPath}. Rebuild the index with the current builder.`);
+  }
+
   return manifest as IndexManifest;
+}
+
+function isCompatibleHistoryIndex(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const h = value as Record<string, unknown>;
+  return h.algorithm === "dataset-observed-history-v1" &&
+    h.exactRouting === EXACT_HISTORY_SHARD_ROUTING &&
+    h.instructionRouting === INSTRUCTION_HISTORY_SHARD_ROUTING &&
+    h.semantics === "observed-not-origin" &&
+    h.timestampNormalization === "utc-v1";
+}
+
+/** Sparse history shards contain observed dataset metadata, never origin claims. */
+export async function readHistoryShard(
+  indexDir: string,
+  kind: "exact" | "instructions",
+  routeKey: string,
+): Promise<HistoryShard> {
+  const normalized = routeKey.toLowerCase();
+  if (!/^[0-9a-f]{2}\/[0-9a-f]{2}$/.test(normalized)) {
+    throw new IndexError(`Invalid history route: ${routeKey}`);
+  }
+  const [directory, file] = normalized.split("/");
+  const shard = await readGzipShard(
+    path.join(indexDir, "history", kind, directory, `${file}.json.gz`),
+    kind === "exact" ? "history_exact" : "history_instructions",
+    normalized, undefined, true,
+  );
+  for (const [hash, value] of Object.entries(shard)) {
+    if (!new RegExp(`^[0-9a-f]{${kind === "exact" ? 40 : 64}}$`).test(hash) ||
+        hash.slice(0, 4) !== directory + file || !isHistorySummary(value)) {
+      throw new IndexError(`Invalid history summary at route ${normalized}`);
+    }
+  }
+  return shard as HistoryShard;
+}
+
+export async function lookupExactHistory(indexDir: string, blobSha1: string): Promise<HistorySummaryRecord | null> {
+  const route = exactHistoryRoute(blobSha1);
+  const shard = await readHistoryShard(indexDir, "exact", route.key);
+  return Object.prototype.hasOwnProperty.call(shard, blobSha1.toLowerCase())
+    ? shard[blobSha1.toLowerCase()] : null;
+}
+
+export async function lookupInstructionHistory(indexDir: string, instructionsSha256: string): Promise<HistorySummaryRecord | null> {
+  const route = instructionHistoryRoute(instructionsSha256);
+  const shard = await readHistoryShard(indexDir, "instructions", route.key);
+  return Object.prototype.hasOwnProperty.call(shard, instructionsSha256.toLowerCase())
+    ? shard[instructionsSha256.toLowerCase()] : null;
+}
+
+const HISTORY_UTC_TIMESTAMP_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+
+function isCanonicalHistoryTimestamp(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    HISTORY_UTC_TIMESTAMP_RE.test(value) &&
+    !Number.isNaN(Date.parse(value))
+  );
+}
+
+function isHistoryObservation(
+  value: unknown,
+): value is NonNullable<HistorySummaryRecord["earliestObserved"]> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const obs = value as Record<string, unknown>;
+  if (
+    typeof obs.repoFullName !== "string" ||
+    typeof obs.path !== "string" ||
+    !isCanonicalHistoryTimestamp(obs.firstCommitAt) ||
+    !(
+      obs.lastCommitAt === null ||
+      isCanonicalHistoryTimestamp(obs.lastCommitAt)
+    )
+  ) {
+    return false;
+  }
+  return (
+    obs.lastCommitAt === null ||
+    obs.lastCommitAt >= obs.firstCommitAt
+  );
+}
+
+function isHistorySummary(value: unknown): value is HistorySummaryRecord {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const s = value as Record<string, unknown>;
+  const total = s.totalLocationCount;
+  const fetched = s.historyFetchedLocationCount;
+  const usable = s.usableLocationCount;
+  const chronology = s.chronologyAnomalyCount;
+  const conflicts = s.conflictingLocationCount;
+  const counts = [total, fetched, usable, chronology, conflicts];
+
+  if (
+    counts.some((n) => !Number.isInteger(n) || (n as number) < 0) ||
+    (total as number) < 1 ||
+    [fetched, usable, chronology, conflicts].some(
+      (n) => (n as number) > (total as number),
+    ) ||
+    (usable as number) + (chronology as number) > (total as number) ||
+    (usable as number) + (conflicts as number) > (total as number)
+  ) {
+    return false;
+  }
+
+  const coverage =
+    usable === 0
+      ? "none"
+      : usable === total && chronology === 0 && conflicts === 0
+        ? "complete"
+        : "partial";
+  if (s.coverage !== coverage) return false;
+
+  if (usable === 0) {
+    return s.earliestObserved === null && s.latestObserved === null;
+  }
+
+  const earliest = s.earliestObserved;
+  const latest = s.latestObserved;
+  if (!isHistoryObservation(earliest) || !isHistoryObservation(latest)) {
+    return false;
+  }
+
+  return earliest.firstCommitAt <= latest.firstCommitAt;
 }
 
 function isCompatibleVariantIndex(value: unknown): boolean {

@@ -5,7 +5,7 @@
  */
 
 export interface IndexManifest {
-  readonly schemaVersion: "0.4";
+  readonly schemaVersion: "0.5";
   readonly kind: "skilllineage-exact-index";
   readonly source: IndexSource;
   readonly indexes: IndexDescriptors;
@@ -13,7 +13,36 @@ export interface IndexManifest {
   readonly distinctHashCount: number;
   readonly instructionIndex: InstructionIndexStats;
   readonly variantIndex: VariantIndexDescriptor;
+  readonly historyIndex: HistoryIndexDescriptor;
 }
+
+export interface HistoryIndexDescriptor {
+  readonly algorithm: "dataset-observed-history-v1";
+  readonly exactRouting: "git-blob-sha1-hex4-v1";
+  readonly instructionRouting: "instructions-sha256-hex4-v1";
+  readonly semantics: "observed-not-origin";
+  readonly timestampNormalization: "utc-v1";
+}
+
+export interface HistoryObservation {
+  readonly repoFullName: string;
+  readonly path: string;
+  readonly firstCommitAt: string;
+  readonly lastCommitAt: string | null;
+}
+
+export interface HistorySummaryRecord {
+  readonly totalLocationCount: number;
+  readonly historyFetchedLocationCount: number;
+  readonly usableLocationCount: number;
+  readonly chronologyAnomalyCount: number;
+  readonly conflictingLocationCount: number;
+  readonly coverage: "none" | "partial" | "complete";
+  readonly earliestObserved: HistoryObservation | null;
+  readonly latestObserved: HistoryObservation | null;
+}
+
+export type HistoryShard = Record<string, HistorySummaryRecord>;
 
 export interface IndexSource {
   readonly name: string;
