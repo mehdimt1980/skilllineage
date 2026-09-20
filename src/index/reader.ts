@@ -181,7 +181,9 @@ function isCanonicalHistoryTimestamp(value: unknown): value is string {
   );
 }
 
-function isHistoryObservation(value: unknown): value is HistorySummaryRecord["earliestObserved"] {
+function isHistoryObservation(
+  value: unknown,
+): value is NonNullable<HistorySummaryRecord["earliestObserved"]> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;
   }
@@ -240,14 +242,13 @@ function isHistorySummary(value: unknown): value is HistorySummaryRecord {
     return s.earliestObserved === null && s.latestObserved === null;
   }
 
-  if (
-    !isHistoryObservation(s.earliestObserved) ||
-    !isHistoryObservation(s.latestObserved)
-  ) {
+  const earliest = s.earliestObserved;
+  const latest = s.latestObserved;
+  if (!isHistoryObservation(earliest) || !isHistoryObservation(latest)) {
     return false;
   }
 
-  return s.earliestObserved.firstCommitAt <= s.latestObserved.firstCommitAt;
+  return earliest.firstCommitAt <= latest.firstCommitAt;
 }
 
 function isCompatibleVariantIndex(value: unknown): boolean {
