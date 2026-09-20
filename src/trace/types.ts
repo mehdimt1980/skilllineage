@@ -1,5 +1,5 @@
 /**
- * Trace report schema for SkillLineage v0.2.
+ * Trace report schema for SkillLineage v0.3.
  */
 
 import type { IndexOccurrence } from "../index/types.js";
@@ -9,7 +9,7 @@ export interface TraceProfiling { stages: Record<string, number>; counts: Record
 export interface TraceProfilingOptions { profile: TraceProfiling; }
 
 export interface TraceReport {
-  readonly schemaVersion: "0.2";
+  readonly schemaVersion: "0.3";
   readonly query: TraceQuery;
   readonly match: TraceMatch;
   readonly origin: {
@@ -53,7 +53,46 @@ export interface VariantCandidatesMatch {
   readonly approximate: true;
   readonly candidateGenerationTruncated: boolean;
   readonly candidates: readonly VariantCandidate[];
+  readonly temporalEvidence: TraceTemporalEvidence;
 }
+
+export interface TraceTemporalCandidateObservation {
+  readonly instructionsSha256: string;
+  readonly coverage: "partial" | "complete";
+  readonly earliestObserved: TraceHistoryObservation;
+}
+
+export interface TraceTemporalRelation {
+  readonly left: TraceTemporalCandidateObservation;
+  readonly right: TraceTemporalCandidateObservation;
+  readonly relation:
+    | "left_first_observed_before_right"
+    | "right_first_observed_before_left"
+    | "same_first_observed_at";
+}
+
+export type TraceTemporalEvidence =
+  | {
+      readonly status: "available";
+      readonly semantics: "dataset_observation_order_only";
+      readonly basis: "earliest_observed_first_commit_at";
+      readonly candidateCount: number;
+      readonly totalPairCount: number;
+      readonly comparablePairCount: number;
+      readonly nonComparablePairCount: number;
+      readonly relations: readonly TraceTemporalRelation[];
+    }
+  | {
+      readonly status: "not_available";
+      readonly semantics: "dataset_observation_order_only";
+      readonly basis: "earliest_observed_first_commit_at";
+      readonly reason: "fewer_than_two_candidates" | "insufficient_usable_history";
+      readonly candidateCount: number;
+      readonly totalPairCount: number;
+      readonly comparablePairCount: 0;
+      readonly nonComparablePairCount: number;
+      readonly relations: readonly [];
+    };
 
 export interface VariantCandidate {
   readonly instructionsSha256: string;

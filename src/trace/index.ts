@@ -13,4 +13,7 @@ export type {
   TraceProfilingOptions,
   TraceHistoryEvidence,
   TraceHistoryObservation,
+  TraceTemporalEvidence,
+  TraceTemporalRelation,
+  TraceTemporalCandidateObservation,
 } from "./types.js";

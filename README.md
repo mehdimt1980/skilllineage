@@ -109,6 +109,7 @@ Implemented:
 - [x] schema-0.4 precomputed variant-enrichment summaries
 - [x] schema-0.5 dataset-observed historical evidence summaries
 - [x] trace schema 0.2 user-facing observed historical evidence
+- [x] trace schema 0.3 pairwise temporal observation evidence
 
 Planned:
 
@@ -192,9 +193,11 @@ Schema 0.5 adds sparse `history/exact/aa/bb.json.gz` and `history/instructions/a
 
 These timestamps do not establish origin, authorship, or copying direction. Historical coverage in GitSkills is incomplete. Schema-0.4 indexes must be rebuilt for the schema-0.5 reader; the matching and ranking algorithms remain unchanged.
 
-Normal `trace` output now exposes schema-0.5 dataset-observed history with public trace schema 0.2. Exact matches use the matched raw Git blob's history. Same-instructions matches use the normalized-instruction group's history. Each final variant candidate carries its own instruction-group history. A missing sparse record reports `not_available` with `no_stored_history`; an empty normalized instruction body reports `empty_normalized_instructions` for instruction-level history. Exact raw-content history remains available for an empty instruction body.
+Normal `trace` output exposes schema-0.5 dataset-observed history, introduced in public trace schema 0.2. Exact matches use the matched raw Git blob's history. Same-instructions matches use the normalized-instruction group's history. Each final variant candidate carries its own instruction-group history. A missing sparse record reports `not_available` with `no_stored_history`; an empty normalized instruction body reports `empty_normalized_instructions` for instruction-level history. Exact raw-content history remains available for an empty instruction body.
 
 `earliestObserved` is the earliest usable observation among indexed locations represented by the stored evidence, **not** an origin repository. Coverage `none`, `partial`, and `complete` counts usable observations among distinct indexed repository/path locations in that history group. `complete` means all those indexed locations have usable history; it does not mean GitSkills has complete historical coverage globally. `origin.status` remains `not_inferred`, and dates never affect matching or ranking.
+
+Trace schema 0.3 adds `temporalEvidence` only to `variant_candidates` results. It compares each pair of final candidates using their already-loaded `earliestObserved.firstCommitAt` timestamps. Relations follow candidate ranking order and report which instruction group was first observed in the indexed dataset, or that both have the same first-observation time. Missing usable history makes a pair non-comparable; the result reports comparable and non-comparable pair counts. Partial coverage still permits a comparison, but leaves the historical picture incomplete. Temporal ordering does not establish which Skill existed first outside the dataset, which repository is a source, or whether one candidate was copied from another. It does not change ranking or cause additional history reads.
 
 ## Continuous Integration
 
