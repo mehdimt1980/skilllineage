@@ -169,7 +169,9 @@ describe("sparse history reader", () => {
       earliestObserved: null, latestObserved: null,
     };
     await writeFile(file, gzipSync(Buffer.from(JSON.stringify({ [exactHash]: summary }))));
-    expect(await lookupExactHistory(dir, exactHash.toUpperCase())).toEqual(summary);
+    const events: import("./reader.js").ShardReadEvent[] = [];
+    expect(await lookupExactHistory(dir, exactHash.toUpperCase(), (event) => events.push(event))).toEqual(summary);
+    expect(events).toMatchObject([{ shardKind: "history_exact", prefix: "a1/b2" }]);
     await writeFile(file, gzipSync(Buffer.from(JSON.stringify({ [exactHash]: { ...summary, coverage: "complete" } }))));
     await expect(readHistoryShard(dir, "exact", "a1/b2")).rejects.toThrow("Invalid history summary");
     await writeFile(file, gzipSync(Buffer.from("not-json")));

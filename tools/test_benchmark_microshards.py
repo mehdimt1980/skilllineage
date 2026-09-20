@@ -62,6 +62,12 @@ class SketchMicroshardMetricTests(unittest.TestCase):
         self.assertGreater(enrichment_metrics["p50ShardBytes"], 0)
         self.assertGreater(enrichment_metrics["p95ShardBytes"], 0)
 
+        self.write_gzip(index / "history" / "exact" / "a1" / "b2.json.gz", {"a1b2": {}})
+        self.write_gzip(index / "history" / "instructions" / "c3" / "d4.json.gz", {"c3d4": {}})
+        history_metrics = benchmark.index_size_metrics(index)["categories"]
+        self.assertEqual(history_metrics["historyExact"]["fileCount"], 1)
+        self.assertEqual(history_metrics["historyInstructions"]["fileCount"], 1)
+
     def test_profiling_summary_accounts_for_variant_enrichment_io(self):
         results = [
             {
@@ -73,7 +79,9 @@ class SketchMicroshardMetricTests(unittest.TestCase):
                             "shardKind": "variant_enrichment",
                             "compressedBytes": 123,
                             "decompressedBytes": 456,
-                        }
+                        },
+                        {"shardKind": "history_exact", "compressedBytes": 11, "decompressedBytes": 22},
+                        {"shardKind": "history_instructions", "compressedBytes": 33, "decompressedBytes": 44},
                     ],
                 },
                 "diagnostic": None,
@@ -83,6 +91,8 @@ class SketchMicroshardMetricTests(unittest.TestCase):
         self.assertEqual(summary["io"]["variant_enrichment"]["shardReads"], 1)
         self.assertEqual(summary["io"]["variant_enrichment"]["compressedBytes"], 123)
         self.assertEqual(summary["io"]["variant_enrichment"]["decompressedBytes"], 456)
+        self.assertEqual(summary["io"]["history_exact"]["shardReads"], 1)
+        self.assertEqual(summary["io"]["history_instructions"]["compressedBytes"], 33)
         self.assertEqual(
             summary["candidateGeneration"]["enrichmentSummaryShardCount"]["p95"],
             1,

@@ -12,6 +12,7 @@ import {
   readAnchorShard,
   readSketchShard,
   readVariantEnrichmentShard,
+  lookupExactHistory,
   variantEnrichmentRoute,
   shardPrefix,
 } from "../index/index.js";
@@ -37,6 +38,7 @@ import type {
   VariantCandidate,
   TraceProfilingOptions,
 } from "./types.js";
+import { attachVariantHistory, historyEvidence, instructionHistoryEvidence } from "./history.js";
 
 /**
  * Trace a local skill against a dual (exact + instructions) index.
@@ -98,14 +100,24 @@ export async function traceSkill(
     lookupExact(indexDir, hexBlobHash, observer),
   );
   if (exactEntry) {
+    const historyReadStart = profile?.shardReads.length ?? 0;
+    const history = await timed("historyLookupMs", async () =>
+      historyEvidence(await lookupExactHistory(indexDir, hexBlobHash, observer)),
+    );
+    if (profile) {
+      profile.counts.historyExactShardCount = profile.shardReads.slice(historyReadStart)
+        .filter((event) => event.shardKind === "history_exact").length;
+      profile.counts.historyInstructionShardCount = 0;
+    }
     if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
     return {
-      schemaVersion: "0.1",
+      schemaVersion: "0.2",
       query,
       match: {
         type: "exact",
         copyCount: exactEntry.copyCount,
         occurrences: exactEntry.occurrences,
+        history,
       },
       origin: { status: "not_inferred" },
     };
@@ -120,11 +132,20 @@ export async function traceSkill(
       blobHashes,
       (dir, prefix) => readShard(dir, prefix, observer),
     );
+    const historyReadStart = profile?.shardReads.length ?? 0;
+    const history = await timed("historyLookupMs", () =>
+      instructionHistoryEvidence(indexDir, hexInstructionHash, observer),
+    );
+    if (profile) {
+      profile.counts.historyExactShardCount = 0;
+      profile.counts.historyInstructionShardCount = profile.shardReads.slice(historyReadStart)
+        .filter((event) => event.shardKind === "history_instructions").length;
+    }
     if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
     return {
-      schemaVersion: "0.1",
+      schemaVersion: "0.2",
       query,
-      match: sameInstructionsMatch,
+      match: { ...sameInstructionsMatch, history },
       origin: { status: "not_inferred" },
     };
   }
@@ -187,12 +208,21 @@ export async function traceSkill(
   if (profile && scoringStats) Object.assign(profile.counts, scoringStats);
 
   if (scored.length > 0) {
-    const candidates = await timed("variantEnrichmentMs", () =>
+    const enriched = await timed("variantEnrichmentMs", () =>
       enrichVariantCandidates(indexDir, scored, observer, profile),
     );
+    const historyReadStart = profile?.shardReads.length ?? 0;
+    const { candidates } = await timed("variantHistoryMs", () =>
+      attachVariantHistory(indexDir, enriched, observer),
+    );
+    if (profile) {
+      profile.counts.historyExactShardCount = 0;
+      profile.counts.historyInstructionShardCount = profile.shardReads.slice(historyReadStart)
+        .filter((event) => event.shardKind === "history_instructions").length;
+    }
     if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
     return {
-      schemaVersion: "0.1",
+      schemaVersion: "0.2",
       query,
       match: {
         type: "variant_candidates",
@@ -207,7 +237,7 @@ export async function traceSkill(
 
   if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
   return {
-    schemaVersion: "0.1",
+    schemaVersion: "0.2",
     query,
     match: {
       type: "none",
@@ -228,7 +258,7 @@ export async function enrichVariantCandidates(
   scored: readonly ScoredCandidate[],
   observer?: import("../index/reader.js").ShardReadObserver,
   profile?: import("./types.js").TraceProfiling,
-): Promise<VariantCandidate[]> {
+): Promise<Array<Omit<VariantCandidate, "history">>> {
   const byRoute = new Map<string, ScoredCandidate[]>();
   for (const candidate of scored) {
     const routeKey = variantEnrichmentRoute(candidate.instructionsSha256).key;
@@ -293,7 +323,7 @@ export async function buildSameInstructionsMatch(
   indexDir: string,
   blobHashes: string[],
   readExactShard: typeof readShard = readShard,
-): Promise<SameInstructionsMatch> {
+): Promise<Omit<SameInstructionsMatch, "history">> {
   const distinctBlobHashes = [...new Set(blobHashes)].sort();
 
   const byPrefix = new Map<string, string[]>();

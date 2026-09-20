@@ -189,7 +189,11 @@ Schema-0.3 and older indexes are not compatible with the schema-0.4 reader.
 
 Schema 0.5 adds sparse `history/exact/aa/bb.json.gz` and `history/instructions/aa/bb.json.gz` micro-shards, routed by the first four hex characters of the lowercase Git blob SHA-1 and full normalized-instructions SHA-256 respectively. Summaries count distinct repository/path locations, fetched history, usable timestamps, chronology anomalies, and conflicting duplicate locations. They record deterministic earliest and latest **dataset observations** in UTC and classify indexed-location coverage as `none`, `partial`, or `complete`.
 
-These timestamps do not establish origin, authorship, or copying direction. Historical coverage in GitSkills is incomplete. The summaries are available through internal read-only APIs but are not included in normal `trace` output. Phase 11C will decide how to present them. Schema-0.4 indexes must be rebuilt for the schema-0.5 reader; the matching and ranking algorithms remain unchanged.
+These timestamps do not establish origin, authorship, or copying direction. Historical coverage in GitSkills is incomplete. Schema-0.4 indexes must be rebuilt for the schema-0.5 reader; the matching and ranking algorithms remain unchanged.
+
+Normal `trace` output now exposes schema-0.5 dataset-observed history with public trace schema 0.2. Exact matches use the matched raw Git blob's history. Same-instructions matches use the normalized-instruction group's history. Each final variant candidate carries its own instruction-group history. A missing sparse record reports `not_available` with `no_stored_history`; an empty normalized instruction body reports `empty_normalized_instructions` for instruction-level history. Exact raw-content history remains available for an empty instruction body.
+
+`earliestObserved` is the earliest usable observation among indexed locations represented by the stored evidence, **not** an origin repository. Coverage `none`, `partial`, and `complete` counts usable observations among distinct indexed repository/path locations in that history group. `complete` means all those indexed locations have usable history; it does not mean GitSkills has complete historical coverage globally. `origin.status` remains `not_inferred`, and dates never affect matching or ranking.
 
 ## Continuous Integration
 
@@ -212,7 +216,7 @@ python tools/benchmark-gitskills.py \
 
 The harness deterministically samples real Skills and measures index size, in-process trace latency, exact and same-instruction hit rates, and Recall@1/3/10 for controlled light and medium mutations. It does not modify or download the source dataset, and it is not run by CI. Use `--keep-temp` only when fixture inspection is needed.
 
-Benchmark schema 0.2 also profiles the real retrieval pipeline: shard I/O, compressed and decompressed bytes, stage timings, candidate progression, hot-anchor omission evidence, deterministic slow-query summaries, and separate `variant_enrichment` I/O. Index-size metrics include the recursive `variants/enrichment/` namespace and its shard-size distribution. This diagnostic profiling does not alter trace semantics. Timings depend strongly on storage, operating system, and cache state; benchmark output never includes Skill source text.
+Benchmark schema 0.2 also profiles the real retrieval pipeline: shard I/O, compressed and decompressed bytes, stage timings, candidate progression, hot-anchor omission evidence, deterministic slow-query summaries, and separate `variant_enrichment`, `history_exact`, and `history_instructions` I/O. Index-size metrics include recursive variant enrichment and history namespaces. This diagnostic profiling does not alter matching semantics. Timings depend strongly on storage, operating system, and cache state; benchmark output never includes Skill source text.
 
 Variant retrieval is approximate. The benchmark reports exact normalized 5-token-shingle Jaccard similarity separately from sketch-estimated similarity, including recall for mutations with exact similarity at least 0.70. Aggregate diagnostics identify candidate-generation and filtering misses; optional `--details-output` records per-query diagnostics without Skill source text. Rebuild schema-0.3 and older indexes with the current builder before tracing or benchmarking.
 
