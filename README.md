@@ -225,7 +225,7 @@ The harness deterministically samples real Skills and measures index size, in-pr
 
 Benchmark schema 0.2 also profiles the real retrieval pipeline: shard I/O, compressed and decompressed bytes, stage timings, candidate progression, hot-anchor omission evidence, deterministic slow-query summaries, and separate `variant_enrichment`, `history_exact`, and `history_instructions` I/O. Index-size metrics include recursive variant enrichment and history namespaces. This diagnostic profiling does not alter matching semantics. Timings depend strongly on storage, operating system, and cache state; benchmark output never includes Skill source text.
 
-Variant retrieval is approximate. The benchmark reports exact normalized 5-token-shingle Jaccard similarity separately from sketch-estimated similarity, including recall for mutations with exact similarity at least 0.70. Aggregate diagnostics identify candidate-generation and filtering misses; optional `--details-output` records per-query diagnostics without Skill source text. Rebuild schema-0.3 and older indexes with the current builder before tracing or benchmarking.
+Variant retrieval is approximate. The benchmark reports exact normalized 5-token-shingle Jaccard similarity separately from sketch-estimated similarity, including recall for mutations with exact similarity at least 0.70. Aggregate diagnostics identify candidate-generation and filtering misses; optional `--details-output` records per-query diagnostics without Skill source text. Rebuild schema-0.4 and older indexes with the current builder before tracing or benchmarking; the current reader requires index schema 0.5.
 
 ## Historical data audit (Phase 11A)
 
