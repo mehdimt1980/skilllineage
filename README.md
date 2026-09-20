@@ -107,12 +107,13 @@ Implemented:
 - [x] full-scale retrieval profiling
 - [x] schema-0.3 variant-sketch micro-sharding
 - [x] schema-0.4 precomputed variant-enrichment summaries
+- [x] schema-0.5 dataset-observed historical evidence summaries
+- [x] trace schema 0.2 user-facing observed historical evidence
 
 Planned:
 
 - [ ] benchmark-based variant parameter tuning
-- [ ] richer lineage evidence using repository history
-- [ ] origin inference with explicit confidence/evidence rules
+- [ ] origin inference only if future evidence rules can support it explicitly
 
 ## Development
 
