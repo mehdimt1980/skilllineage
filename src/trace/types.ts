@@ -58,7 +58,7 @@ export interface VariantCandidatesMatch {
 
 export interface TraceTemporalCandidateObservation {
   readonly instructionsSha256: string;
-  readonly coverage: "none" | "partial" | "complete";
+  readonly coverage: "partial" | "complete";
   readonly earliestObserved: TraceHistoryObservation;
 }
 
