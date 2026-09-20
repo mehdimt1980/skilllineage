@@ -273,6 +273,38 @@ class BenchmarkToolingTests(unittest.TestCase):
         self.assertIsNone(slow[0]["missReason"])
         self.assertIsNone(slow[0]["omittedSharedAnchorCount"])
 
+    def test_exact_and_same_instruction_profiling_can_report_history_io(self):
+        exact = {
+            "id": "0:exact",
+            "durationMs": 5.0,
+            "diagnostic": None,
+            "profiling": {
+                "stages": {"historyLookupMs": 1.0, "totalTraceMs": 5.0},
+                "counts": {"historyExactShardCount": 1},
+                "shardReads": [
+                    {"shardKind": "history_exact", "compressedBytes": 10, "decompressedBytes": 20}
+                ],
+            },
+        }
+        same = {
+            "id": "0:same_instructions",
+            "durationMs": 7.0,
+            "diagnostic": None,
+            "profiling": {
+                "stages": {"historyLookupMs": 2.0, "totalTraceMs": 7.0},
+                "counts": {"historyInstructionShardCount": 1},
+                "shardReads": [
+                    {"shardKind": "history_instructions", "compressedBytes": 30, "decompressedBytes": 40}
+                ],
+            },
+        }
+        exact_summary = benchmark.profiling_summary([exact])
+        same_summary = benchmark.profiling_summary([same])
+        self.assertEqual(exact_summary["io"]["history_exact"]["shardReads"], 1)
+        self.assertEqual(exact_summary["candidateGeneration"]["historyExactShardCount"]["p95"], 1)
+        self.assertEqual(same_summary["io"]["history_instructions"]["compressedBytes"], 30)
+        self.assertEqual(same_summary["candidateGeneration"]["historyInstructionShardCount"]["p95"], 1)
+
     def test_benchmark_json_serialization(self):
         output = self.root / "nested" / "report.json"
         benchmark.write_report({"schemaVersion": "0.1", "value": 3}, output)

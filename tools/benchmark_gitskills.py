@@ -326,7 +326,7 @@ def profiling_summary(results):
             stages.setdefault(name, []).append(value)
     reads = [event for item in results for event in item.get("profiling", {}).get("shardReads", [])]
     io = {}
-    for kind in ("variant_anchor", "variant_sketch", "variant_enrichment", "instructions", "exact"):
+    for kind in ("variant_anchor", "variant_sketch", "variant_enrichment", "instructions", "exact", "history_exact", "history_instructions"):
         selected = [event for event in reads if event["shardKind"] == kind]
         io[kind] = {
             "shardReads": len(selected),
@@ -400,6 +400,8 @@ def index_size_metrics(index_dir: Path):
         "variantSketches": category_size(index_dir / "variants" / "sketches"),
         "variantAnchors": category_size(index_dir / "variants" / "anchors"),
         "variantEnrichment": category_size(index_dir / "variants" / "enrichment"),
+        "historyExact": category_size(index_dir / "history" / "exact"),
+        "historyInstructions": category_size(index_dir / "history" / "instructions"),
     }
     all_files = [item for item in index_dir.rglob("*") if item.is_file()]
     return {
@@ -521,11 +523,15 @@ def build_report(
                 "none": latency_summary([item["durationMs"] for item in by_category["none"]]),
             },
             "profiling": {
+                "exact": profiling_summary(by_category["exact"]),
+                "sameInstructions": profiling_summary(by_category["same_instructions"]),
                 "variantLight": profiling_summary(by_category["variant_light"]),
                 "variantMedium": profiling_summary(by_category["variant_medium"]),
                 "none": profiling_summary(by_category["none"]),
             },
             "slowQueries": {
+                "exact": slow_queries(by_category["exact"]),
+                "sameInstructions": slow_queries(by_category["same_instructions"]),
                 "variantLight": slow_queries(by_category["variant_light"]),
                 "variantMedium": slow_queries(by_category["variant_medium"]),
                 "none": slow_queries(by_category["none"]),

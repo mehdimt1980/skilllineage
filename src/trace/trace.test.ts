@@ -19,11 +19,15 @@ import type {
   SketchShard,
   AnchorShard,
   VariantEnrichmentShard,
+  HistoryShard,
 } from "../index/types.js";
 import {
   variantEnrichmentRoute,
   variantSketchRoute,
+  exactHistoryRoute,
+  instructionHistoryRoute,
 } from "../index/routing.js";
+import { attachVariantHistory, EMPTY_NORMALIZED_INSTRUCTIONS_SHA256 } from "./history.js";
 import {
   anchorShardPrefix,
   instructionSketch,
@@ -110,6 +114,8 @@ interface TestIndex {
   sketchShards?: Record<string, SketchShard>;
   anchorShards?: Record<string, AnchorShard>;
   enrichmentShards?: Record<string, VariantEnrichmentShard>;
+  exactHistoryShards?: Record<string, HistoryShard>;
+  instructionHistoryShards?: Record<string, HistoryShard>;
   manifest?: IndexManifest;
 }
 
@@ -168,6 +174,16 @@ async function makeIndex(opts: TestIndex = {}): Promise<string> {
     );
   }
 
+  for (const [kind, shards] of [
+    ["exact", opts.exactHistoryShards],
+    ["instructions", opts.instructionHistoryShards],
+  ] as const) {
+    for (const [route, shard] of Object.entries(shards ?? {})) {
+      const [first, second] = route.split("/");
+      await writeGzip(path.join(dir, "history", kind, first, `${second}.json.gz`), shard);
+    }
+  }
+
   return dir;
 }
 
@@ -190,6 +206,26 @@ const OCCURRENCE_B = {
   lastCommitAt: null,
   historyFetched: false as boolean | null,
 };
+const HISTORY_RECORD = {
+  totalLocationCount: 2,
+  historyFetchedLocationCount: 1,
+  usableLocationCount: 1,
+  chronologyAnomalyCount: 0,
+  conflictingLocationCount: 0,
+  coverage: "partial" as const,
+  earliestObserved: {
+    repoFullName: "alice/skills",
+    path: ".claude/skills/useful/SKILL.md",
+    firstCommitAt: "2026-01-10T12:00:00.000000Z",
+    lastCommitAt: "2026-04-11T10:00:00.000000Z",
+  },
+  latestObserved: {
+    repoFullName: "alice/skills",
+    path: ".claude/skills/useful/SKILL.md",
+    firstCommitAt: "2026-01-10T12:00:00.000000Z",
+    lastCommitAt: "2026-04-11T10:00:00.000000Z",
+  },
+};
 
 beforeEach(() => {
   tempDirs = [];
@@ -198,6 +234,86 @@ afterEach(async () => {
   for (const dir of tempDirs) {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+describe("historical evidence presentation", () => {
+  it("keeps stored coverage none available and passes UTC timestamps through exactly", async () => {
+    const content = "# History anomaly\nprivate text stays in the skill\n";
+    const skillDir = await makeTempSkill({ "SKILL.md": content });
+    const hash = computeGitBlobSha1(Buffer.from(content)).replace(/^sha1:/, "");
+    const record = {
+      ...HISTORY_RECORD,
+      coverage: "none" as const,
+      usableLocationCount: 0,
+      chronologyAnomalyCount: 1,
+      earliestObserved: null,
+      latestObserved: null,
+    };
+    const indexDir = await makeIndex({
+      exactShards: { [hash.slice(0, 2)]: { [hash]: { copyCount: 1, occurrences: [OCCURRENCE_A] } } },
+      exactHistoryShards: { [exactHistoryRoute(hash).key]: { [hash]: record } },
+    });
+    const report = await traceSkill(skillDir, indexDir, TOOL_VERSION);
+    expect(report.schemaVersion).toBe("0.2");
+    expect(report.origin).toEqual({ status: "not_inferred" });
+    if (report.match.type !== "exact") throw new Error("expected exact match");
+    expect(report.match.history).toEqual({ status: "available", semantics: "observed_not_origin", ...record });
+    expect(JSON.stringify(report)).not.toContain(content);
+  });
+
+  it("suppresses empty instruction history while preserving exact raw history", async () => {
+    const indexed = "---\nname: indexed\n---\n";
+    const local = "---\nname: local\n---\n";
+    const blobHash = computeGitBlobSha1(Buffer.from(indexed)).replace(/^sha1:/, "");
+    const instructionHash = instrHex(indexed);
+    expect(instructionHash).toBe(EMPTY_NORMALIZED_INSTRUCTIONS_SHA256);
+    expect(instructionHash).toBe(instrHex(""));
+    const indexDir = await makeIndex({
+      exactShards: { [blobHash.slice(0, 2)]: { [blobHash]: { copyCount: 1, occurrences: [OCCURRENCE_A] } } },
+      instrShards: { [instructionHash.slice(0, 2)]: { [instructionHash]: [blobHash] } },
+      exactHistoryShards: { [exactHistoryRoute(blobHash).key]: { [blobHash]: HISTORY_RECORD } },
+      instructionHistoryShards: { [instructionHistoryRoute(instructionHash).key]: { [instructionHash]: HISTORY_RECORD } },
+    });
+    const profile = { stages: {}, counts: {}, shardReads: [] } as import("./types.js").TraceProfiling;
+    const same = await traceSkill(await makeTempSkill({ "SKILL.md": local }), indexDir, TOOL_VERSION, { profile });
+    if (same.match.type !== "same_instructions") throw new Error("expected same-instructions match");
+    expect(same.match.history).toEqual({
+      status: "not_available", semantics: "observed_not_origin", reason: "empty_normalized_instructions",
+    });
+    expect(profile.shardReads.some((event) => event.shardKind === "history_instructions")).toBe(false);
+    expect(profile.counts.historyInstructionShardCount).toBe(0);
+    const exact = await traceSkill(await makeTempSkill({ "SKILL.md": indexed }), indexDir, TOOL_VERSION);
+    if (exact.match.type !== "exact") throw new Error("expected exact match");
+    expect(exact.match.history.status).toBe("available");
+  });
+
+  it("batches candidate history by route without changing order or dropping missing history", async () => {
+    const first = "a1b2" + "a".repeat(60);
+    const second = "a1b2" + "b".repeat(60);
+    const missing = "a1b2" + "c".repeat(60);
+    const route = instructionHistoryRoute(first).key;
+    const indexDir = await makeIndex({
+      instructionHistoryShards: { [route]: { [first]: HISTORY_RECORD, [second]: HISTORY_RECORD } },
+    });
+    const reads: import("../index/reader.js").ShardReadEvent[] = [];
+    const candidates = [second, missing, first, EMPTY_NORMALIZED_INSTRUCTIONS_SHA256]
+      .map((hash, rank) => ({ instructionsSha256: `sha256:${hash}`, rank }));
+    const result = await attachVariantHistory(indexDir, candidates, (event) => reads.push(event));
+    expect(result.routeCount).toBe(1);
+    expect(reads.filter((event) => event.shardKind === "history_instructions")).toHaveLength(1);
+    expect(result.candidates.map((candidate) => candidate.rank)).toEqual([0, 1, 2, 3]);
+    expect(result.candidates[1].history).toEqual({
+      status: "not_available", semantics: "observed_not_origin", reason: "no_stored_history",
+    });
+    expect(result.candidates[0].history.status).toBe("available");
+    expect(result.candidates[3].history).toEqual({
+      status: "not_available", semantics: "observed_not_origin", reason: "empty_normalized_instructions",
+    });
+
+    await writeFile(path.join(indexDir, "history", "instructions", "a1", "b2.json.gz"),
+      gzipSync(Buffer.from("malformed-json")));
+    await expect(attachVariantHistory(indexDir, candidates)).rejects.toThrow("Malformed shard JSON");
+  });
 });
 
 describe("trace precedence and profiling", () => {
@@ -218,9 +334,18 @@ describe("trace precedence and profiling", () => {
       instrShards: {
         [instructionHash.slice(0, 2)]: { [instructionHash]: [blobHash] },
       },
+      exactHistoryShards: {
+        [exactHistoryRoute(blobHash).key]: { [blobHash]: HISTORY_RECORD },
+      },
     });
     const report = await traceSkill(skillDir, indexDir, TOOL_VERSION);
+    expect(report.schemaVersion).toBe("0.2");
     expect(report.match.type).toBe("exact");
+    if (report.match.type === "exact") {
+      expect(report.match.history).toEqual({
+        status: "available", semantics: "observed_not_origin", ...HISTORY_RECORD,
+      });
+    }
     expect(report.origin.status).toBe("not_inferred");
   });
 
@@ -249,7 +374,14 @@ describe("trace precedence and profiling", () => {
     expect(report.match.type).toBe("exact");
     expect("profiling" in report).toBe(false);
     expect(profile.stages.exactLookupMs).toBeGreaterThanOrEqual(0);
+    expect(profile.stages.historyLookupMs).toBeGreaterThanOrEqual(0);
+    expect(profile.counts.historyExactShardCount).toBe(0);
     expect(profile.shardReads[0]?.shardKind).toBe("exact");
+    if (report.match.type === "exact") {
+      expect(report.match.history).toEqual({
+        status: "not_available", semantics: "observed_not_origin", reason: "no_stored_history",
+      });
+    }
   });
 
   it("resolves frontmatter-only variants as same_instructions", async () => {
@@ -270,9 +402,21 @@ describe("trace precedence and profiling", () => {
       instrShards: {
         [instructionHash.slice(0, 2)]: { [instructionHash]: [blobHash] },
       },
+      instructionHistoryShards: {
+        [instructionHistoryRoute(instructionHash).key]: { [instructionHash]: HISTORY_RECORD },
+      },
     });
-    const report = await traceSkill(skillDir, indexDir, TOOL_VERSION);
+    const profile = { stages: {}, counts: {}, shardReads: [] } as import("./types.js").TraceProfiling;
+    const report = await traceSkill(skillDir, indexDir, TOOL_VERSION, { profile });
     expect(report.match.type).toBe("same_instructions");
+    if (report.match.type === "same_instructions") {
+      expect(report.match.history).toEqual({
+        status: "available", semantics: "observed_not_origin", ...HISTORY_RECORD,
+      });
+    }
+    expect(profile.stages.historyLookupMs).toBeGreaterThanOrEqual(0);
+    expect(profile.counts.historyInstructionShardCount).toBe(1);
+    expect(profile.shardReads.filter((event) => event.shardKind === "history_instructions")).toHaveLength(1);
   });
 
   it("retrieves and enriches a variant without instruction/exact enrichment reads", async () => {
@@ -317,6 +461,11 @@ describe("trace precedence and profiling", () => {
           },
         },
       },
+      instructionHistoryShards: {
+        [instructionHistoryRoute(fullInstructionHash).key]: {
+          [fullInstructionHash]: HISTORY_RECORD,
+        },
+      },
     });
     const profile: import("./types.js").TraceProfiling = {
       stages: {},
@@ -332,6 +481,7 @@ describe("trace precedence and profiling", () => {
         instructionsSha256: `sha256:${fullInstructionHash}`,
         rawVariantCount: 2,
         copyCount: 3,
+        history: { status: "available", semantics: "observed_not_origin", coverage: "partial" },
       });
     }
     expect(
@@ -349,18 +499,25 @@ describe("trace precedence and profiling", () => {
     expect(profile.counts.enrichmentInstructionShardCount).toBe(0);
     expect(profile.counts.enrichmentExactShardCount).toBe(0);
     expect(profile.stages.variantEnrichmentMs).toBeGreaterThanOrEqual(0);
+    expect(profile.stages.variantHistoryMs).toBeGreaterThanOrEqual(0);
+    expect(profile.counts.historyInstructionShardCount).toBe(1);
+    expect(profile.shardReads.filter((event) => event.shardKind === "history_instructions")).toHaveLength(1);
   });
 
   it("returns none for unrelated content", async () => {
     const skillDir = await makeTempSkill({
       "SKILL.md": "orbital marine crystal\n",
     });
+    const profile = { stages: {}, counts: {}, shardReads: [] } as import("./types.js").TraceProfiling;
     const report = await traceSkill(
       skillDir,
       await makeIndex(),
       TOOL_VERSION,
+      { profile },
     );
     expect(report.match.type).toBe("none");
+    expect(profile.shardReads.some((event) => event.shardKind.startsWith("history_"))).toBe(false);
+    expect(profile.stages).not.toHaveProperty("historyLookupMs");
   });
 });
 

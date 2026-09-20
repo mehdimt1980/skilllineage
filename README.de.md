@@ -107,12 +107,13 @@ Implementiert:
 - [x] Full-Scale-Retrieval-Profiling
 - [x] Schema-0.3-Microsharding für Variant-Sketches
 - [x] Schema-0.4 mit vorab berechneten Variant-Enrichment-Summaries
+- [x] Schema-0.5 mit Summaries historischer Datensatz-Beobachtungen
+- [x] Trace-Schema 0.2 mit nutzerseitig sichtbarer beobachteter Historien-Evidenz
 
 Geplant:
 
 - [ ] parameterbezogene Optimierung anhand realer Benchmark-Ergebnisse
-- [ ] reichhaltigere Lineage-Evidenz anhand der Repository-Historie
-- [ ] Origin-Inference mit expliziten Confidence- und Evidenzregeln
+- [ ] Origin-Inference nur, falls zukünftige Evidenzregeln sie ausdrücklich tragen können
 
 ## Entwicklung
 
@@ -189,7 +190,11 @@ Schema-0.3- und ältere Indizes sind nicht mit dem Schema-0.4-Reader kompatibel.
 
 Schema 0.5 ergänzt sparse Microshards unter `history/exact/aa/bb.json.gz` und `history/instructions/aa/bb.json.gz`. Das Routing verwendet die ersten vier Hex-Zeichen des kleingeschriebenen Git-Blob-SHA-1 beziehungsweise des vollständigen SHA-256 der normalisierten Instructions. Die Summaries zählen eindeutige Repository-/Pfad-Orte, abgerufene Historie, nutzbare Zeitstempel, Chronologie-Anomalien und widersprüchliche Duplikate. Früheste und späteste **Beobachtungen im Datensatz** werden deterministisch in UTC gespeichert. `none`, `partial` und `complete` beschreiben nur die Abdeckung der indexierten Orte.
 
-Diese Zeitstempel belegen weder Ursprung noch Urheberschaft oder Kopierrichtung. Die historische Abdeckung in GitSkills ist unvollständig. Interne, schreibgeschützte APIs können die Summaries lesen; die normale `trace`-Ausgabe enthält sie noch nicht. Phase 11C entscheidet über ihre Darstellung. Schema-0.4-Indizes müssen für den Schema-0.5-Reader neu erzeugt werden; Matching und Ranking bleiben unverändert.
+Diese Zeitstempel belegen weder Ursprung noch Urheberschaft oder Kopierrichtung. Die historische Abdeckung in GitSkills ist unvollständig. Schema-0.4-Indizes müssen für den Schema-0.5-Reader neu erzeugt werden; Matching und Ranking bleiben unverändert.
+
+Die normale `trace`-Ausgabe zeigt jetzt die im Schema-0.5-Index gespeicherten Beobachtungen; das öffentliche Trace-Schema ist 0.2. Exakte Treffer verwenden die Historie des passenden Git-Blobs, Treffer mit gleichen Instructions die Historie der normalisierten Instruction-Gruppe. Jeder finale Variant-Kandidat erhält seine eigene Instruction-Gruppen-Historie. Ein fehlender sparse Datensatz ergibt `not_available` mit `no_stored_history`; ein leerer normalisierter Instruction-Text ergibt `empty_normalized_instructions` für die Instruction-Historie. Die exakte Raw-Content-Historie bleibt dabei nutzbar.
+
+`earliestObserved` ist die früheste nutzbare Beobachtung unter den indexierten Orten der gespeicherten Evidenz, **kein** Ursprung. `none`, `partial` und `complete` beschreiben die nutzbare Historie der eindeutigen indexierten Repository-/Pfad-Orte einer Gruppe. `complete` bedeutet, dass alle diese Orte nutzbare Historie haben; es bedeutet keine vollständige globale historische Abdeckung von GitSkills. `origin.status` bleibt `not_inferred`; Zeitstempel beeinflussen weder Matching noch Ranking.
 
 ## Continuous Integration
 
@@ -212,7 +217,7 @@ python tools/benchmark-gitskills.py \
 
 Die Harness zieht deterministische Stichproben realer Skills und misst Indexgröße, In-Process-Trace-Latenz, Exact- und Same-Instructions-Trefferraten sowie Recall@1/3/10 für kontrollierte leichte und mittlere Mutationen. Sie verändert oder lädt den Quelldatensatz nicht herunter und läuft nicht in der CI. `--keep-temp` dient ausschließlich der gezielten Untersuchung erzeugter Fixtures.
 
-Das Benchmarkschema 0.2 profiliert zusätzlich den echten Retrieval-Pfad: Shard-I/O, komprimierte und dekomprimierte Bytes, Stage-Timings, Kandidatenentwicklung, Hinweise auf ausgelassene Hot-Anchors, deterministische Slow-Query-Zusammenfassungen sowie separates `variant_enrichment`-I/O. Die Indexgrößenmetriken erfassen außerdem rekursiv `variants/enrichment/` und dessen Shard-Größenverteilung. Dieses diagnostische Profiling verändert die Trace-Semantik nicht. Timing-Werte hängen stark von Speicher, Betriebssystem und Cache-Zustand ab; Benchmark-Ausgaben enthalten niemals Skill-Quelltext.
+Das Benchmarkschema 0.2 profiliert zusätzlich den echten Retrieval-Pfad: Shard-I/O, komprimierte und dekomprimierte Bytes, Stage-Timings, Kandidatenentwicklung, Hinweise auf ausgelassene Hot-Anchors, deterministische Slow-Query-Zusammenfassungen sowie separates I/O für `variant_enrichment`, `history_exact` und `history_instructions`. Die Indexgrößenmetriken erfassen rekursiv Variant-Enrichment und beide History-Bereiche. Dieses diagnostische Profiling verändert die Matching-Semantik nicht. Timing-Werte hängen stark von Speicher, Betriebssystem und Cache-Zustand ab; Benchmark-Ausgaben enthalten niemals Skill-Quelltext.
 
 Die Variantensuche ist approximativ. Der Benchmark meldet den exakten Jaccard-Wert normalisierter 5-Token-Shingles getrennt von der Sketch-Schätzung, einschließlich Recall für Mutationen mit einem exakten Wert von mindestens 0,70. Aggregierte Diagnosen zeigen Verluste bei Kandidatengenerierung und Filterung; `--details-output` schreibt bei Bedarf Einzeldiagnosen ohne Skill-Quelltext. Schema-0.3- und ältere Indizes müssen vor Trace oder Benchmark mit dem aktuellen Builder neu erzeugt werden.
 ## Audit historischer Metadaten (Phase 11A)

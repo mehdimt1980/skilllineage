@@ -136,6 +136,7 @@ export async function readHistoryShard(
   indexDir: string,
   kind: "exact" | "instructions",
   routeKey: string,
+  observer?: ShardReadObserver,
 ): Promise<HistoryShard> {
   const normalized = routeKey.toLowerCase();
   if (!/^[0-9a-f]{2}\/[0-9a-f]{2}$/.test(normalized)) {
@@ -145,7 +146,7 @@ export async function readHistoryShard(
   const shard = await readGzipShard(
     path.join(indexDir, "history", kind, directory, `${file}.json.gz`),
     kind === "exact" ? "history_exact" : "history_instructions",
-    normalized, undefined, true,
+    normalized, observer, true,
   );
   for (const [hash, value] of Object.entries(shard)) {
     if (!new RegExp(`^[0-9a-f]{${kind === "exact" ? 40 : 64}}$`).test(hash) ||
@@ -156,16 +157,16 @@ export async function readHistoryShard(
   return shard as HistoryShard;
 }
 
-export async function lookupExactHistory(indexDir: string, blobSha1: string): Promise<HistorySummaryRecord | null> {
+export async function lookupExactHistory(indexDir: string, blobSha1: string, observer?: ShardReadObserver): Promise<HistorySummaryRecord | null> {
   const route = exactHistoryRoute(blobSha1);
-  const shard = await readHistoryShard(indexDir, "exact", route.key);
+  const shard = await readHistoryShard(indexDir, "exact", route.key, observer);
   return Object.prototype.hasOwnProperty.call(shard, blobSha1.toLowerCase())
     ? shard[blobSha1.toLowerCase()] : null;
 }
 
-export async function lookupInstructionHistory(indexDir: string, instructionsSha256: string): Promise<HistorySummaryRecord | null> {
+export async function lookupInstructionHistory(indexDir: string, instructionsSha256: string, observer?: ShardReadObserver): Promise<HistorySummaryRecord | null> {
   const route = instructionHistoryRoute(instructionsSha256);
-  const shard = await readHistoryShard(indexDir, "instructions", route.key);
+  const shard = await readHistoryShard(indexDir, "instructions", route.key, observer);
   return Object.prototype.hasOwnProperty.call(shard, instructionsSha256.toLowerCase())
     ? shard[instructionsSha256.toLowerCase()] : null;
 }

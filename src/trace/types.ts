@@ -1,5 +1,5 @@
 /**
- * Trace report schema for SkillLineage v0.1.
+ * Trace report schema for SkillLineage v0.2.
  */
 
 import type { IndexOccurrence } from "../index/types.js";
@@ -9,7 +9,7 @@ export interface TraceProfiling { stages: Record<string, number>; counts: Record
 export interface TraceProfilingOptions { profile: TraceProfiling; }
 
 export interface TraceReport {
-  readonly schemaVersion: "0.1";
+  readonly schemaVersion: "0.2";
   readonly query: TraceQuery;
   readonly match: TraceMatch;
   readonly origin: {
@@ -32,6 +32,7 @@ export interface ExactMatch {
   readonly type: "exact";
   readonly copyCount: number;
   readonly occurrences: readonly IndexOccurrence[];
+  readonly history: TraceHistoryEvidence;
 }
 
 export interface SameInstructionsMatch {
@@ -43,6 +44,7 @@ export interface SameInstructionsMatch {
   /** Sorted list of sha1:-prefixed Git blob hashes. */
   readonly contentHashes: readonly string[];
   readonly occurrences: readonly IndexOccurrence[];
+  readonly history: TraceHistoryEvidence;
 }
 
 export interface VariantCandidatesMatch {
@@ -60,7 +62,34 @@ export interface VariantCandidate {
   readonly rawVariantCount: number;
   readonly copyCount: number;
   readonly examples: readonly VariantCandidateExample[];
+  readonly history: TraceHistoryEvidence;
 }
+
+export interface TraceHistoryObservation {
+  readonly repoFullName: string;
+  readonly path: string;
+  readonly firstCommitAt: string;
+  readonly lastCommitAt: string | null;
+}
+
+export type TraceHistoryEvidence =
+  | {
+      readonly status: "available";
+      readonly semantics: "observed_not_origin";
+      readonly coverage: "none" | "partial" | "complete";
+      readonly totalLocationCount: number;
+      readonly historyFetchedLocationCount: number;
+      readonly usableLocationCount: number;
+      readonly chronologyAnomalyCount: number;
+      readonly conflictingLocationCount: number;
+      readonly earliestObserved: TraceHistoryObservation | null;
+      readonly latestObserved: TraceHistoryObservation | null;
+    }
+  | {
+      readonly status: "not_available";
+      readonly semantics: "observed_not_origin";
+      readonly reason: "no_stored_history" | "empty_normalized_instructions";
+    };
 
 export interface VariantCandidateExample {
   readonly repoFullName: string;

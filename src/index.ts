@@ -77,4 +77,6 @@ export type {
   NoneMatch,
   TraceProfiling,
   TraceProfilingOptions,
+  TraceHistoryEvidence,
+  TraceHistoryObservation,
 } from "./trace/index.js";

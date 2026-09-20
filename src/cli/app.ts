@@ -16,7 +16,7 @@ export const VERSION = pkg.version;
 const HELP = `
 skilllineage v${VERSION}
 
-Identify the origin, duplicates, forks, and mutations of AI Agent Skills.
+Trace copies, variants, and lineage evidence of AI Agent Skills.
 
 USAGE
   skilllineage [options] <command> [args]
