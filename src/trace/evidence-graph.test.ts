@@ -120,6 +120,26 @@ describe("evidence graph projection", () => {
     expect(graph.edges).toHaveLength(3);
   });
 
+  it("rejects duplicate candidate instruction hashes that would collide node ids", () => {
+    expect(() =>
+      buildEvidenceGraph(
+        query,
+        [candidates[0], { ...candidates[1], instructionsSha256: candidates[0].instructionsSha256 }],
+        {
+          status: "not_available",
+          semantics: "dataset_observation_order_only",
+          basis: "earliest_observed_first_commit_at",
+          reason: "insufficient_usable_history",
+          candidateCount: 2,
+          totalPairCount: 1,
+          comparablePairCount: 0,
+          nonComparablePairCount: 1,
+          relations: [],
+        },
+      ),
+    ).toThrow("unique final candidate instruction hashes");
+  });
+
   it("satisfies count invariants for three and one candidates", () => {
     const one: TraceTemporalEvidence = {
       status: "not_available", semantics: "dataset_observation_order_only",
