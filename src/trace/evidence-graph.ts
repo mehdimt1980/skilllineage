@@ -21,6 +21,9 @@ export function buildEvidenceGraph(
     instructionsSha256: candidate.instructionsSha256,
   }));
   const candidateIds = new Set(candidateNodes.map((node) => node.id));
+  if (candidateIds.size !== candidateNodes.length) {
+    throw new Error("Evidence graph requires unique final candidate instruction hashes");
+  }
   const nodes: TraceEvidenceGraph["nodes"] = [
     { id: "query", kind: "query", instructionsSha256: query.instructionsSha256 },
     ...candidateNodes,
