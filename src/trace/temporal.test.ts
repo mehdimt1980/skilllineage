@@ -18,10 +18,16 @@ function candidate(
     firstCommitAt,
     lastCommitAt: null,
   };
+  const usableLocationCount = firstCommitAt === null
+    ? 0
+    : coverage === "complete"
+      ? 2
+      : 1;
   const history: TraceHistoryEvidence = {
     status: "available", semantics: "observed_not_origin", coverage,
-    totalLocationCount: 2, historyFetchedLocationCount: 1,
-    usableLocationCount: firstCommitAt === null ? 0 : 1,
+    totalLocationCount: 2,
+    historyFetchedLocationCount: usableLocationCount,
+    usableLocationCount,
     chronologyAnomalyCount: 0, conflictingLocationCount: 0,
     earliestObserved, latestObserved: earliestObserved,
   };
