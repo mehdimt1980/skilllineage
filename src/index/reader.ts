@@ -199,7 +199,7 @@ function isHistoryObservation(value: unknown): value is HistorySummaryRecord["ea
   }
   return (
     obs.lastCommitAt === null ||
-    (obs.lastCommitAt as string) >= (obs.firstCommitAt as string)
+    obs.lastCommitAt >= obs.firstCommitAt
   );
 }
 
