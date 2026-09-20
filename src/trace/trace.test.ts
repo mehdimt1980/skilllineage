@@ -254,9 +254,10 @@ describe("historical evidence presentation", () => {
       exactHistoryShards: { [exactHistoryRoute(hash).key]: { [hash]: record } },
     });
     const report = await traceSkill(skillDir, indexDir, TOOL_VERSION);
-    expect(report.schemaVersion).toBe("0.2");
+    expect(report.schemaVersion).toBe("0.3");
     expect(report.origin).toEqual({ status: "not_inferred" });
     if (report.match.type !== "exact") throw new Error("expected exact match");
+    expect(report.match).not.toHaveProperty("temporalEvidence");
     expect(report.match.history).toEqual({ status: "available", semantics: "observed_not_origin", ...record });
     expect(JSON.stringify(report)).not.toContain(content);
   });
@@ -277,6 +278,7 @@ describe("historical evidence presentation", () => {
     const profile = { stages: {}, counts: {}, shardReads: [] } as import("./types.js").TraceProfiling;
     const same = await traceSkill(await makeTempSkill({ "SKILL.md": local }), indexDir, TOOL_VERSION, { profile });
     if (same.match.type !== "same_instructions") throw new Error("expected same-instructions match");
+    expect(same.match).not.toHaveProperty("temporalEvidence");
     expect(same.match.history).toEqual({
       status: "not_available", semantics: "observed_not_origin", reason: "empty_normalized_instructions",
     });
@@ -339,7 +341,7 @@ describe("trace precedence and profiling", () => {
       },
     });
     const report = await traceSkill(skillDir, indexDir, TOOL_VERSION);
-    expect(report.schemaVersion).toBe("0.2");
+    expect(report.schemaVersion).toBe("0.3");
     expect(report.match.type).toBe("exact");
     if (report.match.type === "exact") {
       expect(report.match.history).toEqual({
@@ -483,6 +485,10 @@ describe("trace precedence and profiling", () => {
         copyCount: 3,
         history: { status: "available", semantics: "observed_not_origin", coverage: "partial" },
       });
+      expect(report.match.temporalEvidence).toMatchObject({
+        status: "not_available", reason: "fewer_than_two_candidates",
+        candidateCount: 1, totalPairCount: 0,
+      });
     }
     expect(
       profile.shardReads.some(
@@ -502,6 +508,9 @@ describe("trace precedence and profiling", () => {
     expect(profile.stages.variantHistoryMs).toBeGreaterThanOrEqual(0);
     expect(profile.counts.historyInstructionShardCount).toBe(1);
     expect(profile.shardReads.filter((event) => event.shardKind === "history_instructions")).toHaveLength(1);
+    expect(profile.stages.variantTemporalEvidenceMs).toBeGreaterThanOrEqual(0);
+    expect(profile.counts.temporalCandidateCount).toBe(1);
+    expect(profile.counts.temporalComparablePairCount).toBe(0);
   });
 
   it("returns none for unrelated content", async () => {
@@ -516,6 +525,7 @@ describe("trace precedence and profiling", () => {
       { profile },
     );
     expect(report.match.type).toBe("none");
+    expect(report.match).not.toHaveProperty("temporalEvidence");
     expect(profile.shardReads.some((event) => event.shardKind.startsWith("history_"))).toBe(false);
     expect(profile.stages).not.toHaveProperty("historyLookupMs");
   });

@@ -79,4 +79,7 @@ export type {
   TraceProfilingOptions,
   TraceHistoryEvidence,
   TraceHistoryObservation,
+  TraceTemporalEvidence,
+  TraceTemporalRelation,
+  TraceTemporalCandidateObservation,
 } from "./trace/index.js";
