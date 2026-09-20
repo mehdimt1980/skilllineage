@@ -66,7 +66,11 @@ export function buildTemporalEvidence(
 
 function observation(candidate: VariantCandidate): TraceTemporalCandidateObservation | null {
   const history = candidate.history;
-  if (history.status !== "available" || history.earliestObserved === null) return null;
+  if (
+    history.status !== "available" ||
+    history.coverage === "none" ||
+    history.earliestObserved === null
+  ) return null;
   return {
     instructionsSha256: candidate.instructionsSha256,
     coverage: history.coverage,
