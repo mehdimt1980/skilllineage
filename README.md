@@ -110,6 +110,7 @@ Implemented:
 - [x] schema-0.5 dataset-observed historical evidence summaries
 - [x] trace schema 0.2 user-facing observed historical evidence
 - [x] trace schema 0.3 pairwise temporal observation evidence
+- [x] trace schema 0.4 evidence graph projection
 
 Planned:
 
@@ -198,6 +199,8 @@ Normal `trace` output exposes schema-0.5 dataset-observed history, introduced in
 `earliestObserved` is the earliest usable observation among indexed locations represented by the stored evidence, **not** an origin repository. Coverage `none`, `partial`, and `complete` counts usable observations among distinct indexed repository/path locations in that history group. `complete` means all those indexed locations have usable history; it does not mean GitSkills has complete historical coverage globally. `origin.status` remains `not_inferred`, and dates never affect matching or ranking.
 
 Trace schema 0.3 adds `temporalEvidence` only to `variant_candidates` results. It compares each pair of final candidates using their already-loaded `earliestObserved.firstCommitAt` timestamps. Relations follow candidate ranking order and report which instruction group was first observed in the indexed dataset, or that both have the same first-observation time. Missing usable history makes a pair non-comparable; the result reports comparable and non-comparable pair counts. Partial coverage still permits a comparison, but leaves the historical picture incomplete. Temporal ordering does not establish which Skill existed first outside the dataset, which repository is a source, or whether one candidate was copied from another. It does not change ranking or cause additional history reads.
+
+Trace schema 0.4 adds `evidenceGraph` to variant-candidate results. It is a serialization of observed evidence relationships, not a reconstructed historical lineage graph. One query node connects to each final candidate through an approximate query-similarity edge, copied from that candidate's existing score and shared-anchor count. Temporal-observation edges copy the already-reported first-observation relations and coverage states in candidate order. No candidate-to-candidate textual similarity is computed. Neither edge type establishes copying, ancestry, derivation, or origin. Graph projection leaves ranking, temporal evidence, and shard I/O unchanged.
 
 ## Continuous Integration
 

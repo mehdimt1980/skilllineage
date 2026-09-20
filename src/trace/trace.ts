@@ -40,6 +40,7 @@ import type {
 } from "./types.js";
 import { attachVariantHistory, historyEvidence, instructionHistoryEvidence } from "./history.js";
 import { buildTemporalEvidence } from "./temporal.js";
+import { buildEvidenceGraph } from "./evidence-graph.js";
 
 /**
  * Trace a local skill against a dual (exact + instructions) index.
@@ -112,7 +113,7 @@ export async function traceSkill(
     }
     if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
     return {
-      schemaVersion: "0.3",
+      schemaVersion: "0.4",
       query,
       match: {
         type: "exact",
@@ -144,7 +145,7 @@ export async function traceSkill(
     }
     if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
     return {
-      schemaVersion: "0.3",
+      schemaVersion: "0.4",
       query,
       match: { ...sameInstructionsMatch, history },
       origin: { status: "not_inferred" },
@@ -230,9 +231,19 @@ export async function traceSkill(
       profile.counts.temporalComparablePairCount = temporalEvidence.comparablePairCount;
       profile.counts.temporalNonComparablePairCount = temporalEvidence.nonComparablePairCount;
     }
+    const graphStart = profile ? performance.now() : 0;
+    const evidenceGraph = buildEvidenceGraph(query, candidates, temporalEvidence);
+    if (profile) {
+      profile.stages.variantEvidenceGraphMs = performance.now() - graphStart;
+      profile.counts.evidenceGraphNodeCount = evidenceGraph.nodeCount;
+      profile.counts.evidenceGraphCandidateNodeCount = evidenceGraph.candidateNodeCount;
+      profile.counts.evidenceGraphEdgeCount = evidenceGraph.edgeCount;
+      profile.counts.evidenceGraphSimilarityEdgeCount = evidenceGraph.similarityEdgeCount;
+      profile.counts.evidenceGraphTemporalObservationEdgeCount = evidenceGraph.temporalObservationEdgeCount;
+    }
     if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
     return {
-      schemaVersion: "0.3",
+      schemaVersion: "0.4",
       query,
       match: {
         type: "variant_candidates",
@@ -241,6 +252,7 @@ export async function traceSkill(
         candidateGenerationTruncated: generated.truncated,
         candidates,
         temporalEvidence,
+        evidenceGraph,
       },
       origin: { status: "not_inferred" },
     };
@@ -248,7 +260,7 @@ export async function traceSkill(
 
   if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
   return {
-    schemaVersion: "0.3",
+    schemaVersion: "0.4",
     query,
     match: {
       type: "none",
