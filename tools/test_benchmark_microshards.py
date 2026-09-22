@@ -72,8 +72,8 @@ class SketchMicroshardMetricTests(unittest.TestCase):
         results = [
             {
                 "profiling": {
-                    "stages": {"variantEnrichmentMs": 12.0, "variantTemporalEvidenceMs": 0.2},
-                    "counts": {"enrichmentSummaryShardCount": 1, "temporalComparablePairCount": 3},
+                    "stages": {"variantEnrichmentMs": 12.0, "variantTemporalEvidenceMs": 0.2, "variantEvidenceGraphMs": 0.1},
+                    "counts": {"enrichmentSummaryShardCount": 1, "temporalComparablePairCount": 3, "evidenceGraphEdgeCount": 5},
                     "shardReads": [
                         {
                             "shardKind": "variant_enrichment",
@@ -99,6 +99,8 @@ class SketchMicroshardMetricTests(unittest.TestCase):
         )
         self.assertEqual(summary["traceStagesMs"]["variantTemporalEvidenceMs"]["p95"], 0.2)
         self.assertEqual(summary["candidateGeneration"]["temporalComparablePairCount"]["p95"], 3)
+        self.assertEqual(summary["traceStagesMs"]["variantEvidenceGraphMs"]["p95"], 0.1)
+        self.assertEqual(summary["candidateGeneration"]["evidenceGraphEdgeCount"]["p95"], 5)
 
 
 if __name__ == "__main__":

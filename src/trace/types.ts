@@ -1,5 +1,5 @@
 /**
- * Trace report schema for SkillLineage v0.3.
+ * Trace report schema for SkillLineage v0.4.
  */
 
 import type { IndexOccurrence } from "../index/types.js";
@@ -9,7 +9,7 @@ export interface TraceProfiling { stages: Record<string, number>; counts: Record
 export interface TraceProfilingOptions { profile: TraceProfiling; }
 
 export interface TraceReport {
-  readonly schemaVersion: "0.3";
+  readonly schemaVersion: "0.4";
   readonly query: TraceQuery;
   readonly match: TraceMatch;
   readonly origin: {
@@ -54,6 +54,62 @@ export interface VariantCandidatesMatch {
   readonly candidateGenerationTruncated: boolean;
   readonly candidates: readonly VariantCandidate[];
   readonly temporalEvidence: TraceTemporalEvidence;
+  readonly evidenceGraph: TraceEvidenceGraph;
+}
+
+export interface TraceEvidenceGraphQueryNode {
+  readonly id: "query";
+  readonly kind: "query";
+  readonly instructionsSha256: string;
+}
+
+export interface TraceEvidenceGraphCandidateNode {
+  readonly id: string;
+  readonly kind: "variant_candidate";
+  readonly candidateIndex: number;
+  readonly rank: number;
+  readonly instructionsSha256: string;
+}
+
+export type TraceEvidenceGraphNode =
+  | TraceEvidenceGraphQueryNode
+  | TraceEvidenceGraphCandidateNode;
+
+export interface TraceEvidenceGraphSimilarityEdge {
+  readonly kind: "query_similarity";
+  readonly nodeIds: readonly ["query", string];
+  readonly approximate: true;
+  readonly method: "bottom-k-token-shingles-v1";
+  readonly estimatedSimilarity: number;
+  readonly sharedAnchors: number;
+}
+
+export interface TraceEvidenceGraphTemporalEdge {
+  readonly kind: "temporal_observation";
+  readonly nodeIds: readonly [string, string];
+  readonly semantics: "dataset_observation_order_only";
+  readonly basis: "earliest_observed_first_commit_at";
+  readonly relation: TraceTemporalRelation["relation"];
+  readonly leftCoverage: "partial" | "complete";
+  readonly rightCoverage: "partial" | "complete";
+  readonly leftFirstObservedAt: string;
+  readonly rightFirstObservedAt: string;
+}
+
+export type TraceEvidenceGraphEdge =
+  | TraceEvidenceGraphSimilarityEdge
+  | TraceEvidenceGraphTemporalEdge;
+
+export interface TraceEvidenceGraph {
+  readonly semantics: "evidence_links_not_lineage_direction";
+  readonly queryNodeId: "query";
+  readonly nodeCount: number;
+  readonly candidateNodeCount: number;
+  readonly edgeCount: number;
+  readonly similarityEdgeCount: number;
+  readonly temporalObservationEdgeCount: number;
+  readonly nodes: readonly TraceEvidenceGraphNode[];
+  readonly edges: readonly TraceEvidenceGraphEdge[];
 }
 
 export interface TraceTemporalCandidateObservation {

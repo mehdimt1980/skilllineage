@@ -82,4 +82,11 @@ export type {
   TraceTemporalEvidence,
   TraceTemporalRelation,
   TraceTemporalCandidateObservation,
+  TraceEvidenceGraph,
+  TraceEvidenceGraphNode,
+  TraceEvidenceGraphQueryNode,
+  TraceEvidenceGraphCandidateNode,
+  TraceEvidenceGraphEdge,
+  TraceEvidenceGraphSimilarityEdge,
+  TraceEvidenceGraphTemporalEdge,
 } from "./trace/index.js";

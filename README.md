@@ -110,6 +110,7 @@ Implemented:
 - [x] schema-0.5 dataset-observed historical evidence summaries
 - [x] trace schema 0.2 user-facing observed historical evidence
 - [x] trace schema 0.3 pairwise temporal observation evidence
+- [x] trace schema 0.4 evidence graph projection
 
 Planned:
 
@@ -199,6 +200,8 @@ Normal `trace` output exposes schema-0.5 dataset-observed history, introduced in
 
 Trace schema 0.3 adds `temporalEvidence` only to `variant_candidates` results. It compares each pair of final candidates using their already-loaded `earliestObserved.firstCommitAt` timestamps. Relations follow candidate ranking order and report which instruction group was first observed in the indexed dataset, or that both have the same first-observation time. Missing usable history makes a pair non-comparable; the result reports comparable and non-comparable pair counts. Partial coverage still permits a comparison, but leaves the historical picture incomplete. Temporal ordering does not establish which Skill existed first outside the dataset, which repository is a source, or whether one candidate was copied from another. It does not change ranking or cause additional history reads.
 
+Trace schema 0.4 adds `evidenceGraph` to variant-candidate results. It is a serialization of observed evidence relationships, not a reconstructed historical lineage graph. One query node connects to each final candidate through an approximate query-similarity edge, copied from that candidate's existing score and shared-anchor count. Temporal-observation edges copy the already-reported first-observation relations and coverage states in candidate order. No candidate-to-candidate textual similarity is computed. Neither edge type establishes copying, ancestry, derivation, or origin. Graph projection leaves ranking, temporal evidence, and shard I/O unchanged.
+
 ## Continuous Integration
 
 GitHub Actions runs linting, type checking, synthetic tests, and the build on Ubuntu with Node.js 22 and 24 plus Python 3.13. A separate Windows job runs tests and the build with Node.js 24 and Python 3.13 to catch filesystem and path regressions. CI uses read-only repository permissions and never downloads GitSkills or runs real-data benchmarks.
@@ -222,7 +225,7 @@ The harness deterministically samples real Skills and measures index size, in-pr
 
 Benchmark schema 0.2 also profiles the real retrieval pipeline: shard I/O, compressed and decompressed bytes, stage timings, candidate progression, hot-anchor omission evidence, deterministic slow-query summaries, and separate `variant_enrichment`, `history_exact`, and `history_instructions` I/O. Index-size metrics include recursive variant enrichment and history namespaces. This diagnostic profiling does not alter matching semantics. Timings depend strongly on storage, operating system, and cache state; benchmark output never includes Skill source text.
 
-Variant retrieval is approximate. The benchmark reports exact normalized 5-token-shingle Jaccard similarity separately from sketch-estimated similarity, including recall for mutations with exact similarity at least 0.70. Aggregate diagnostics identify candidate-generation and filtering misses; optional `--details-output` records per-query diagnostics without Skill source text. Rebuild schema-0.3 and older indexes with the current builder before tracing or benchmarking.
+Variant retrieval is approximate. The benchmark reports exact normalized 5-token-shingle Jaccard similarity separately from sketch-estimated similarity, including recall for mutations with exact similarity at least 0.70. Aggregate diagnostics identify candidate-generation and filtering misses; optional `--details-output` records per-query diagnostics without Skill source text. Rebuild schema-0.4 and older indexes with the current builder before tracing or benchmarking; the current reader requires index schema 0.5.
 
 ## Historical data audit (Phase 11A)
 
