@@ -1,5 +1,5 @@
 /**
- * Trace report schema for SkillLineage v0.4.
+ * Trace report schema for SkillLineage v0.5.
  */
 
 import type { IndexOccurrence } from "../index/types.js";
@@ -9,9 +9,10 @@ export interface TraceProfiling { stages: Record<string, number>; counts: Record
 export interface TraceProfilingOptions { profile: TraceProfiling; }
 
 export interface TraceReport {
-  readonly schemaVersion: "0.4";
+  readonly schemaVersion: "0.5";
   readonly query: TraceQuery;
   readonly match: TraceMatch;
+  readonly evidenceSummary: TraceEvidenceSummary;
   readonly origin: {
     readonly status: "not_inferred";
   };
@@ -196,4 +197,34 @@ export interface NoneMatch {
   readonly type: "none";
   readonly copyCount: 0;
   readonly occurrences: readonly [];
+}
+
+export interface TraceEvidenceSummary {
+  readonly semantics: "derived_from_trace_evidence_only";
+  readonly headline: string;
+  readonly facts: readonly TraceEvidenceSummaryFact[];
+  readonly limitations: readonly TraceEvidenceSummaryLimitation[];
+}
+
+export interface TraceEvidenceSummaryFact {
+  readonly code:
+    | "match"
+    | "history_coverage"
+    | "earliest_observed"
+    | "candidate_history"
+    | "temporal_comparability"
+    | "evidence_graph";
+  readonly text: string;
+}
+
+export interface TraceEvidenceSummaryLimitation {
+  readonly code:
+    | "origin_not_inferred"
+    | "dataset_observation_only"
+    | "history_incomplete"
+    | "history_unavailable"
+    | "approximate_similarity"
+    | "candidate_generation_truncated"
+    | "no_match_not_global_absence";
+  readonly text: string;
 }

@@ -108,7 +108,10 @@ Implementiert:
 - [x] Schema-0.3-Microsharding für Variant-Sketches
 - [x] Schema-0.4 mit vorab berechneten Variant-Enrichment-Summaries
 - [x] Schema-0.5 mit Summaries historischer Datensatz-Beobachtungen
-- [x] Trace-Schema 0.2 mit nutzerseitig sichtbarer beobachteter Historien-Evidenz
+- [x] trace schema 0.2 mit nutzerseitig sichtbarer beobachteter Historien-Evidenz
+- [x] trace schema 0.3 pairwise temporal observation evidence
+- [x] trace schema 0.4 evidence graph projection
+- [x] trace schema 0.5 deterministische, menschenlesbare Evidenz-Zusammenfassung
 
 Geplant:
 
@@ -199,6 +202,12 @@ Die normale `trace`-Ausgabe zeigt die im Schema-0.5-Index gespeicherten Beobacht
 Trace-Schema 0.3 ergänzt `temporalEvidence` ausschließlich bei `variant_candidates`. Für jedes Paar finaler Kandidaten werden die bereits geladenen Zeitstempel `earliestObserved.firstCommitAt` verglichen. Die Reihenfolge der Relationen folgt dem bestehenden Kandidaten-Ranking. Die Aussage beschränkt sich darauf, welche Instruction-Gruppe im indexierten Datensatz zuerst beobachtet wurde oder ob beide erstmals zur selben Zeit beobachtet wurden. Ohne nutzbare Historie bleibt ein Paar unvergleichbar; die Ausgabe zählt vergleichbare und unvergleichbare Paare. Partielle Abdeckung erlaubt einen Beobachtungsvergleich, lässt aber das historische Bild unvollständig. Die zeitliche Reihenfolge beweist weder, welcher Skill außerhalb des Datensatzes zuerst existierte, noch welches Repository eine Quelle ist oder ob ein Kandidat von einem anderen kopiert wurde. Ranking und History-I/O bleiben unverändert.
 
 Trace-Schema 0.4 ergänzt `evidenceGraph` bei Variant-Kandidaten. Dieser Graph stellt beobachtete Evidenzbeziehungen dar und ist keine Rekonstruktion historischer Abstammung. Ein Query-Knoten ist mit jedem finalen Kandidaten durch eine ungefähre Query-Similarity-Kante verbunden; Score und gemeinsame Anchors werden vom bestehenden Kandidaten übernommen. Kanten für zeitliche Beobachtungen übernehmen die bereits ausgegebenen Relationen und Abdeckungszustände in Kandidatenreihenfolge. Eine textuelle Ähnlichkeit zwischen Kandidaten wird nicht berechnet. Keine der Kanten belegt Kopieren, Abstammung, Ableitung oder Ursprung. Die Projektion verändert weder Ranking noch temporale Evidenz oder Shard-I/O.
+
+Trace-Schema 0.5 ergänzt `evidenceSummary` bei allen Trace-Ergebnissen (`exact`, `same_instructions`, `variant_candidates` und `none`).
+
+> Die Evidenz-Zusammenfassung wird deterministisch aus der bereits von SkillLineage zurückgegebenen Trace-Evidenz erzeugt. Sie fügt keine historische Inferenz, Ursprungs-Erkennung, Kopierrichtung oder Konfidenzwerte hinzu. Die zugrundeliegende strukturierte Evidenz bleibt maßgeblich.
+
+Die Zusammenfassungsgenerierung erfolgt rein deterministisch und synchron; es werden weder LLMs noch generative Texte, externe Netzaufrufe oder zusätzliche Indexlesevorgänge verwendet. Die CLI-Ausgabe bleibt strukturiertes JSON.
 
 ## Continuous Integration
 

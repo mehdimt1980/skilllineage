@@ -254,7 +254,7 @@ describe("historical evidence presentation", () => {
       exactHistoryShards: { [exactHistoryRoute(hash).key]: { [hash]: record } },
     });
     const report = await traceSkill(skillDir, indexDir, TOOL_VERSION);
-    expect(report.schemaVersion).toBe("0.4");
+    expect(report.schemaVersion).toBe("0.5");
     expect(report.origin).toEqual({ status: "not_inferred" });
     if (report.match.type !== "exact") throw new Error("expected exact match");
     expect(report.match).not.toHaveProperty("temporalEvidence");
@@ -343,7 +343,7 @@ describe("trace precedence and profiling", () => {
       },
     });
     const report = await traceSkill(skillDir, indexDir, TOOL_VERSION);
-    expect(report.schemaVersion).toBe("0.4");
+    expect(report.schemaVersion).toBe("0.5");
     expect(report.match.type).toBe("exact");
     if (report.match.type === "exact") {
       expect(report.match.history).toEqual({
@@ -377,8 +377,17 @@ describe("trace precedence and profiling", () => {
     });
     expect(report.match.type).toBe("exact");
     expect("profiling" in report).toBe(false);
+    expect(report.evidenceSummary).toMatchObject({
+      semantics: "derived_from_trace_evidence_only",
+      headline: "Exact content match found in 1 indexed occurrence.",
+    });
+    expect(report.evidenceSummary.facts.length).toBeGreaterThan(0);
+    expect(report.evidenceSummary.limitations.length).toBeGreaterThan(0);
     expect(profile.stages.exactLookupMs).toBeGreaterThanOrEqual(0);
     expect(profile.stages.historyLookupMs).toBeGreaterThanOrEqual(0);
+    expect(profile.stages.evidenceSummaryMs).toBeGreaterThanOrEqual(0);
+    expect(profile.counts.evidenceSummaryFactCount).toBe(report.evidenceSummary.facts.length);
+    expect(profile.counts.evidenceSummaryLimitationCount).toBe(report.evidenceSummary.limitations.length);
     expect(profile.counts.historyExactShardCount).toBe(0);
     expect(profile.shardReads[0]?.shardKind).toBe("exact");
     if (report.match.type === "exact") {
@@ -413,12 +422,19 @@ describe("trace precedence and profiling", () => {
     const profile = { stages: {}, counts: {}, shardReads: [] } as import("./types.js").TraceProfiling;
     const report = await traceSkill(skillDir, indexDir, TOOL_VERSION, { profile });
     expect(report.match.type).toBe("same_instructions");
+    expect(report.evidenceSummary).toMatchObject({
+      semantics: "derived_from_trace_evidence_only",
+    });
+    expect(report.evidenceSummary.facts[0].code).toBe("match");
     if (report.match.type === "same_instructions") {
       expect(report.match.history).toEqual({
         status: "available", semantics: "observed_not_origin", ...HISTORY_RECORD,
       });
     }
     expect(profile.stages.historyLookupMs).toBeGreaterThanOrEqual(0);
+    expect(profile.stages.evidenceSummaryMs).toBeGreaterThanOrEqual(0);
+    expect(profile.counts.evidenceSummaryFactCount).toBe(report.evidenceSummary.facts.length);
+    expect(profile.counts.evidenceSummaryLimitationCount).toBe(report.evidenceSummary.limitations.length);
     expect(profile.counts.historyInstructionShardCount).toBe(1);
     expect(profile.shardReads.filter((event) => event.shardKind === "history_instructions")).toHaveLength(1);
   });
@@ -480,6 +496,16 @@ describe("trace precedence and profiling", () => {
       profile,
     });
     expect(report.match.type).toBe("variant_candidates");
+    expect(report.evidenceSummary).toMatchObject({
+      semantics: "derived_from_trace_evidence_only",
+    });
+    expect(report.evidenceSummary.facts.map((f) => f.code)).toEqual([
+      "match",
+      "match",
+      "candidate_history",
+      "temporal_comparability",
+      "evidence_graph",
+    ]);
     if (report.match.type === "variant_candidates") {
       expect(report.match.candidates[0]).toMatchObject({
         instructionsSha256: `sha256:${fullInstructionHash}`,
@@ -517,6 +543,9 @@ describe("trace precedence and profiling", () => {
     expect(profile.counts.enrichmentExactShardCount).toBe(0);
     expect(profile.stages.variantEnrichmentMs).toBeGreaterThanOrEqual(0);
     expect(profile.stages.variantHistoryMs).toBeGreaterThanOrEqual(0);
+    expect(profile.stages.evidenceSummaryMs).toBeGreaterThanOrEqual(0);
+    expect(profile.counts.evidenceSummaryFactCount).toBe(report.evidenceSummary.facts.length);
+    expect(profile.counts.evidenceSummaryLimitationCount).toBe(report.evidenceSummary.limitations.length);
     expect(profile.counts.historyInstructionShardCount).toBe(1);
     expect(profile.shardReads.filter((event) => event.shardKind === "history_instructions")).toHaveLength(1);
     expect(profile.stages.variantTemporalEvidenceMs).toBeGreaterThanOrEqual(0);
@@ -541,6 +570,25 @@ describe("trace precedence and profiling", () => {
       { profile },
     );
     expect(report.match.type).toBe("none");
+    expect(report.evidenceSummary).toEqual({
+      semantics: "derived_from_trace_evidence_only",
+      headline: "No match met the current index and retrieval criteria.",
+      facts: [
+        {
+          code: "match",
+          text: "No exact, same-instructions, or approximate variant match met the current index and retrieval criteria.",
+        },
+      ],
+      limitations: [
+        {
+          code: "no_match_not_global_absence",
+          text: "A none result does not prove that no related Skill exists outside the current index or retrieval criteria.",
+        },
+      ],
+    });
+    expect(profile.stages.evidenceSummaryMs).toBeGreaterThanOrEqual(0);
+    expect(profile.counts.evidenceSummaryFactCount).toBe(1);
+    expect(profile.counts.evidenceSummaryLimitationCount).toBe(1);
     expect(report.match).not.toHaveProperty("temporalEvidence");
     expect(report.match).not.toHaveProperty("evidenceGraph");
     expect(profile.shardReads.some((event) => event.shardKind.startsWith("history_"))).toBe(false);

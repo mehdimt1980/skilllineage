@@ -72,8 +72,19 @@ class SketchMicroshardMetricTests(unittest.TestCase):
         results = [
             {
                 "profiling": {
-                    "stages": {"variantEnrichmentMs": 12.0, "variantTemporalEvidenceMs": 0.2, "variantEvidenceGraphMs": 0.1},
-                    "counts": {"enrichmentSummaryShardCount": 1, "temporalComparablePairCount": 3, "evidenceGraphEdgeCount": 5},
+                    "stages": {
+                        "variantEnrichmentMs": 12.0,
+                        "variantTemporalEvidenceMs": 0.2,
+                        "variantEvidenceGraphMs": 0.1,
+                        "evidenceSummaryMs": 0.05,
+                    },
+                    "counts": {
+                        "enrichmentSummaryShardCount": 1,
+                        "temporalComparablePairCount": 3,
+                        "evidenceGraphEdgeCount": 5,
+                        "evidenceSummaryFactCount": 5,
+                        "evidenceSummaryLimitationCount": 2,
+                    },
                     "shardReads": [
                         {
                             "shardKind": "variant_enrichment",
@@ -101,6 +112,9 @@ class SketchMicroshardMetricTests(unittest.TestCase):
         self.assertEqual(summary["candidateGeneration"]["temporalComparablePairCount"]["p95"], 3)
         self.assertEqual(summary["traceStagesMs"]["variantEvidenceGraphMs"]["p95"], 0.1)
         self.assertEqual(summary["candidateGeneration"]["evidenceGraphEdgeCount"]["p95"], 5)
+        self.assertEqual(summary["traceStagesMs"]["evidenceSummaryMs"]["p95"], 0.05)
+        self.assertEqual(summary["candidateGeneration"]["evidenceSummaryFactCount"]["p95"], 5)
+        self.assertEqual(summary["candidateGeneration"]["evidenceSummaryLimitationCount"]["p95"], 2)
 
 
 if __name__ == "__main__":
