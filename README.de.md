@@ -207,7 +207,7 @@ Trace-Schema 0.5 ergänzt `evidenceSummary` bei allen Trace-Ergebnissen (`exact`
 
 > Die Evidenz-Zusammenfassung wird deterministisch aus der bereits von SkillLineage zurückgegebenen Trace-Evidenz erzeugt. Sie fügt keine historische Inferenz, Ursprungs-Erkennung, Kopierrichtung oder Konfidenzwerte hinzu. Die zugrundeliegende strukturierte Evidenz bleibt maßgeblich.
 
-Die Zusammenfassungsgenerierung erfolgt rein deterministisch und synchron; es werden weder LLMs noch generative Texte, externe Netzaufrufe oder zusätzliche Indexlesevorgänge verwendet. Die CLI-Ausgabe bleibt strukturiertes JSON.
+Die Zusammenfassungsgenerierung erfolgt rein deterministisch und synchron; es werden weder LLMs noch generative Texte, externe Netzaufrufe oder zusätzliche Indexlesevorgänge verwendet. Die CLI-Ausgabe bleibt strukturiertes JSON. Die serialisierten Texte in `evidenceSummary` sind derzeit ausschließlich auf Englisch.
 
 ## Continuous Integration
 
