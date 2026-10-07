@@ -207,7 +207,7 @@ Trace schema 0.5 adds `evidenceSummary` to every trace result (`exact`, `same_in
 
 > The evidence summary is generated deterministically from the trace evidence already returned by SkillLineage. It does not add historical inference, origin detection, copy direction, or confidence scoring. The underlying structured evidence remains authoritative.
 
-Summary generation is entirely deterministic and synchronous; it does not use an LLM, generative text, external network access, or additional index reads. CLI output remains structured JSON.
+Summary generation is entirely deterministic and synchronous; it does not use an LLM, generative text, external network access, or additional index reads. CLI output remains structured JSON. Serialized evidence-summary text is currently English only.
 
 ## Continuous Integration
 
