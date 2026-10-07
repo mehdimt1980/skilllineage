@@ -38,16 +38,17 @@ EXAMPLES
 
 export interface CliResult {
   stdout: string;
+  stderr: string;
   exitCode: number;
 }
 
 export function run(argv: readonly string[]): CliResult | Promise<CliResult> {
   if (argv.includes("--version") || argv.includes("-v")) {
-    return { stdout: VERSION, exitCode: 0 };
+    return { stdout: VERSION, stderr: "", exitCode: 0 };
   }
 
-  if (argv.includes("--help") || argv.includes("-h")) {
-    return { stdout: HELP, exitCode: 0 };
+  if (argv.includes("--help") || argv.includes("-h") || argv.length === 0) {
+    return { stdout: HELP, stderr: "", exitCode: 0 };
   }
 
   const command = argv[0];
@@ -56,7 +57,8 @@ export function run(argv: readonly string[]): CliResult | Promise<CliResult> {
     const target = argv[1];
     if (!target) {
       return {
-        stdout: "Error: fingerprint requires a <path> argument.",
+        stdout: "",
+        stderr: "Error: fingerprint requires a <path> argument.",
         exitCode: 1,
       };
     }
@@ -68,8 +70,8 @@ export function run(argv: readonly string[]): CliResult | Promise<CliResult> {
     const pathB = argv[2];
     if (!pathA || !pathB) {
       return {
-        stdout:
-          "Error: compare requires two arguments: <skill-a> <skill-b>.",
+        stdout: "",
+        stderr: "Error: compare requires two arguments: <skill-a> <skill-b>.",
         exitCode: 1,
       };
     }
@@ -80,7 +82,8 @@ export function run(argv: readonly string[]): CliResult | Promise<CliResult> {
     const skillPath = argv[1];
     if (!skillPath) {
       return {
-        stdout: "Error: trace requires a <path> argument.",
+        stdout: "",
+        stderr: "Error: trace requires a <path> argument.",
         exitCode: 1,
       };
     }
@@ -88,15 +91,19 @@ export function run(argv: readonly string[]): CliResult | Promise<CliResult> {
     const indexDir = indexIdx !== -1 ? argv[indexIdx + 1] : undefined;
     if (!indexDir) {
       return {
-        stdout: "Error: trace requires --index <dir>.",
+        stdout: "",
+        stderr: "Error: trace requires --index <dir>.",
         exitCode: 1,
       };
     }
     return runTrace(skillPath, indexDir);
   }
 
-  // No command or unknown command: show help
-  return { stdout: HELP, exitCode: 0 };
+  return {
+    stdout: "",
+    stderr: `Error: Unknown command "${command}". Run 'skilllineage --help' for usage.`,
+    exitCode: 1,
+  };
 }
 
 async function runFingerprint(target: string): Promise<CliResult> {
@@ -104,11 +111,12 @@ async function runFingerprint(target: string): Promise<CliResult> {
     const report = await fingerprint(target, VERSION);
     return {
       stdout: JSON.stringify(report, null, 2),
+      stderr: "",
       exitCode: 0,
     };
   } catch (error) {
     if (error instanceof FingerprintError) {
-      return { stdout: `Error: ${error.message}`, exitCode: 1 };
+      return { stdout: "", stderr: `Error: ${error.message}`, exitCode: 1 };
     }
     throw error;
   }
@@ -119,11 +127,12 @@ async function runCompare(pathA: string, pathB: string): Promise<CliResult> {
     const report = await compareSkills(pathA, pathB, VERSION);
     return {
       stdout: JSON.stringify(report, null, 2),
+      stderr: "",
       exitCode: 0,
     };
   } catch (error) {
     if (error instanceof FingerprintError) {
-      return { stdout: `Error: ${error.message}`, exitCode: 1 };
+      return { stdout: "", stderr: `Error: ${error.message}`, exitCode: 1 };
     }
     throw error;
   }
@@ -137,6 +146,7 @@ async function runTrace(
     const report = await traceSkill(skillPath, indexDir, VERSION);
     return {
       stdout: JSON.stringify(report, null, 2),
+      stderr: "",
       exitCode: 0,
     };
   } catch (error) {
@@ -145,7 +155,7 @@ async function runTrace(
       error instanceof IndexError ||
       error instanceof TraceError
     ) {
-      return { stdout: `Error: ${error.message}`, exitCode: 1 };
+      return { stdout: "", stderr: `Error: ${error.message}`, exitCode: 1 };
     }
     throw error;
   }

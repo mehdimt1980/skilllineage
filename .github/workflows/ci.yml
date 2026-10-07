@@ -44,6 +44,8 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
+      - name: Package smoke test
+        run: node tools/test-package.mjs
 
   windows-compatibility:
     name: Node 24 / Windows
@@ -67,3 +69,5 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
+      - name: Package smoke test
+        run: node tools/test-package.mjs
