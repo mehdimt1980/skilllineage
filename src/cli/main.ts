@@ -9,4 +9,5 @@ if (result.stdout) {
 if (result.stderr) {
   process.stderr.write(result.stderr + "\n");
 }
-process.exit(result.exitCode);
+// Set the code without forcing an immediate exit so piped JSON/error output can flush completely.
+process.exitCode = result.exitCode;
