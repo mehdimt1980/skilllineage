@@ -261,6 +261,7 @@ describe("historical evidence presentation", () => {
     expect(report.match).not.toHaveProperty("evidenceGraph");
     expect(report.match.history).toEqual({ status: "available", semantics: "observed_not_origin", ...record });
     expect(JSON.stringify(report)).not.toContain(content);
+    expect(JSON.stringify(report.evidenceSummary)).not.toContain(content);
   });
 
   it("suppresses empty instruction history while preserving exact raw history", async () => {
