@@ -88,9 +88,16 @@ The long-term goal is to make Skill provenance easier to inspect without dependi
 
 ## Project status
 
-SkillLineage is currently **early-stage / experimental**.
+SkillLineage is currently in **pre-1.0 release hardening**.
 
-Implemented:
+## Current Specification & Compatibility
+
+- **Current package version**: `0.1.0` (v1 release candidate)
+- **Current index schema**: `0.5`
+- **Current trace report schema**: `0.5`
+- **Current reader compatibility**: requires index schema `0.5`
+
+Implemented capabilities:
 
 - [x] deterministic Skill fingerprinting
 - [x] Git-compatible blob hashing
@@ -102,9 +109,6 @@ Implemented:
 - [x] exact global trace
 - [x] same-instructions global trace
 - [x] approximate global variant candidate retrieval
-- [x] GitHub Actions CI on Node.js 22 and 24
-- [x] manual real-GitSkills benchmark harness
-- [x] full-scale retrieval profiling
 - [x] schema-0.3 variant-sketch micro-sharding
 - [x] schema-0.4 precomputed variant-enrichment summaries
 - [x] schema-0.5 dataset-observed historical evidence summaries
@@ -112,21 +116,27 @@ Implemented:
 - [x] trace schema 0.3 pairwise temporal observation evidence
 - [x] trace schema 0.4 evidence graph projection
 - [x] trace schema 0.5 deterministic human-readable evidence summary
+- [x] GitHub Actions CI on Node.js 22 and 24 (Linux & Windows)
+- [x] full-scale retrieval profiling & benchmark harness
 
-Planned:
+## Installation & Runtime Requirements
 
-- [ ] benchmark-based variant parameter tuning
-- [ ] origin inference only if future evidence rules can support it explicitly
+### For End Users & Consumers (CLI / Node.js API)
 
-## Development
+- **Node.js >= 22**
+- Zero production dependencies. Python is **not** required for running the CLI or importing the programmatic API (`fingerprint`, `compareSkills`, `traceSkill`).
 
-Requirements:
+```bash
+npm install skilllineage
+```
 
-- Node.js 22+
-- npm
-- Python 3.13 for the offline GitSkills index builder and benchmark harness
+### For Repository Development & Offline Tooling
 
-Install dependencies:
+- **Node.js 22+**
+- **npm**
+- **Python 3.13** (used strictly for offline repository tooling: GitSkills index builder, benchmark harness, and historical data audits)
+
+Install repository dependencies:
 
 ```bash
 npm install
@@ -135,10 +145,7 @@ npm install
 Run checks:
 
 ```bash
-npm test
-npm run lint
-npm run typecheck
-npm run build
+npm run release:check
 ```
 
 Run the built CLI:
@@ -158,38 +165,20 @@ src/
   trace/        global trace engine
 
 tools/
-  build-gitskills-index.py
-  benchmark-gitskills.py
-  run-trace-benchmark.mjs
+  clean-dist.mjs            cross-platform production build cleaner
+  test-package.mjs          tarball smoke test & clean-install verification
+  build-gitskills-index.py  offline GitSkills index builder
+  benchmark-gitskills.py    offline benchmark harness
+  run-trace-benchmark.mjs   benchmark trace worker
 ```
 
 The analysis engines are intentionally kept independent from CLI presentation so they can later be reused from CI, GitHub Actions, or other applications.
 
-## Index schema 0.4
+## Historical Evolution: Index Schema 0.4
 
-Schema 0.4 retains the schema-0.3 four-hex micro-shard layout for variant sketches and adds sparse precomputed enrichment summaries for normalized instruction hashes.
+*(Historical context)* Schema 0.4 introduced the four-hex micro-shard layout for variant sketches and sparse precomputed enrichment summaries for normalized instruction hashes, eliminating secondary shard scans during variant presentation.
 
-Variant sketches remain routed by the first four hex characters of the `variantId`:
-
-```text
-variants/sketches/a1/b2.json.gz
-```
-
-Variant enrichment summaries are routed independently by the first four hex characters of the full normalized-instruction SHA-256:
-
-```text
-variants/enrichment/a1/b2.json.gz
-```
-
-Only non-empty sketch and enrichment micro-shards are written. Enrichment summaries contain only the static fields needed for final variant presentation: raw variant count, deduplicated copy count, and up to three deterministically ordered repository/path examples. They do not contain Skill source text or normalized instruction text.
-
-At trace time, variant candidates no longer reconstruct these summaries by reading instruction shards and multiple exact shards. Final candidates read the required enrichment micro-shards directly, with one physical read per unique enrichment route. Missing or malformed required enrichment data is treated as an inconsistent index and requires a rebuild.
-
-The matching algorithm is unchanged: normalization, 5-token shingles, bottom-32 sketching, anchor generation, estimated similarity, thresholds, caps, ranking, and trace precedence are unchanged. Schema 0.4 is an index/runtime I/O optimization; it does not introduce historical origin inference or change similarity semantics.
-
-Schema-0.3 and older indexes are not compatible with the schema-0.4 reader.
-
-## Index schema 0.5: observed history foundation
+## Current Index Schema: 0.5 (Observed History Foundation)
 
 Schema 0.5 adds sparse `history/exact/aa/bb.json.gz` and `history/instructions/aa/bb.json.gz` micro-shards, routed by the first four hex characters of the lowercase Git blob SHA-1 and full normalized-instructions SHA-256 respectively. Summaries count distinct repository/path locations, fetched history, usable timestamps, chronology anomalies, and conflicting duplicate locations. They record deterministic earliest and latest **dataset observations** in UTC and classify indexed-location coverage as `none`, `partial`, or `complete`.
 

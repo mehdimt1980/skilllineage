@@ -88,9 +88,16 @@ Langfristig soll Skill-Herkunft leichter überprüfbar werden — ohne Abhängig
 
 ## Projektstatus
 
-SkillLineage befindet sich derzeit in einem **frühen / experimentellen Stadium**.
+SkillLineage befindet sich derzeit in der **Pre-1.0-Release-Härtung** (Release Candidate).
 
-Implementiert:
+## Aktuelle Spezifikation & Kompatibilität
+
+- **Aktuelle Paketversion**: `0.1.0` (v1 Release Candidate)
+- **Aktuelles Indexschema**: `0.5`
+- **Aktuelles Trace-Report-Schema**: `0.5`
+- **Aktuelle Reader-Kompatibilität**: erfordert Indexschema `0.5`
+
+Implementierte Fähigkeiten:
 
 - [x] deterministisches Skill-Fingerprinting
 - [x] Git-kompatibles Blob-Hashing
@@ -102,31 +109,34 @@ Implementiert:
 - [x] globaler Exact-Trace
 - [x] globaler Same-Instructions-Trace
 - [x] approximative globale Suche nach Varianten-Kandidaten
-- [x] GitHub-Actions-CI mit Node.js 22 und 24
-- [x] manueller Benchmark für echte GitSkills-Daten
-- [x] Full-Scale-Retrieval-Profiling
 - [x] Schema-0.3-Microsharding für Variant-Sketches
 - [x] Schema-0.4 mit vorab berechneten Variant-Enrichment-Summaries
 - [x] Schema-0.5 mit Summaries historischer Datensatz-Beobachtungen
-- [x] trace schema 0.2 mit nutzerseitig sichtbarer beobachteter Historien-Evidenz
-- [x] trace schema 0.3 pairwise temporal observation evidence
-- [x] trace schema 0.4 evidence graph projection
-- [x] trace schema 0.5 deterministische, menschenlesbare Evidenz-Zusammenfassung
+- [x] Trace-Schema 0.2 mit nutzerseitig sichtbarer beobachteter Historien-Evidenz
+- [x] Trace-Schema 0.3 pairwise temporal observation evidence
+- [x] Trace-Schema 0.4 evidence graph projection
+- [x] Trace-Schema 0.5 deterministische, menschenlesbare Evidenz-Zusammenfassung
+- [x] GitHub-Actions-CI mit Node.js 22 und 24 (Linux & Windows)
+- [x] Full-Scale-Retrieval-Profiling & Benchmark-Harness
 
-Geplant:
+## Installation & Laufzeitanforderungen
 
-- [ ] parameterbezogene Optimierung anhand realer Benchmark-Ergebnisse
-- [ ] Origin-Inference nur, falls zukünftige Evidenzregeln sie ausdrücklich tragen können
+### Für Endanwender & Bibliotheksnutzer (CLI / Node.js API)
 
-## Entwicklung
+- **Node.js >= 22**
+- Keine Produktionsabhängigkeiten (Zero Runtime Dependencies). Python wird für die Ausführung des CLI oder den Import der programmatischen API (`fingerprint`, `compareSkills`, `traceSkill`) **nicht** benötigt.
 
-Voraussetzungen:
+```bash
+npm install skilllineage
+```
 
-- Node.js 22+
-- npm
-- Python 3.13 für den Offline-GitSkills-Index-Builder und die Benchmark-Harness
+### Für Repository-Entwicklung & Offline-Werkzeuge
 
-Abhängigkeiten installieren:
+- **Node.js 22+**
+- **npm**
+- **Python 3.13** (ausschließlich für Offline-Tools im Repository: GitSkills-Index-Builder, Benchmark-Harness und Historien-Audits)
+
+Abhängigkeiten im Repository installieren:
 
 ```bash
 npm install
@@ -135,10 +145,7 @@ npm install
 Prüfungen ausführen:
 
 ```bash
-npm test
-npm run lint
-npm run typecheck
-npm run build
+npm run release:check
 ```
 
 Das gebaute CLI starten:
@@ -158,16 +165,20 @@ src/
   trace/        globale Trace-Engine
 
 tools/
-  build-gitskills-index.py
-  benchmark-gitskills.py
-  run-trace-benchmark.mjs
+  clean-dist.mjs            plattformübergreifender Build-Bereiniger
+  test-package.mjs          Tarball-Smoke-Test & Clean-Install-Verifikation
+  build-gitskills-index.py  Offline-GitSkills-Index-Builder
+  benchmark-gitskills.py    Offline-Benchmark-Harness
+  run-trace-benchmark.mjs   Benchmark-Trace-Worker
 ```
 
 Die Analyse-Engines sind bewusst von der CLI-Darstellung getrennt, damit sie später auch in CI, GitHub Actions oder anderen Anwendungen wiederverwendet werden können.
 
-## Indexschema 0.4
+## Historische Entwicklung: Indexschema 0.4
 
-Schema 0.4 behält das mit Schema 0.3 eingeführte Vier-Hex-Microsharding für Variant-Sketches bei und ergänzt sparse, vorab berechnete Enrichment-Summaries für normalisierte Instruction-Hashes.
+*(Historischer Kontext)* Schema 0.4 behält das mit Schema 0.3 eingeführte Vier-Hex-Microsharding für Variant-Sketches bei und ergänzt sparse, vorab berechnete Enrichment-Summaries für normalisierte Instruction-Hashes, wodurch sekundäre Shard-Scans bei der Darstellung von Varianten entfallen.
+
+## Aktuelles Indexschema: 0.5 (Grundlage für beobachtete Historie)
 
 Variant-Sketches werden weiterhin anhand der ersten vier Hex-Zeichen der `variantId` geroutet:
 

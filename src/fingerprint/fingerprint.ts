@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { readFile, stat, readdir, lstat } from "node:fs/promises";
 import path from "node:path";
@@ -254,7 +255,7 @@ function computeBundleHash(
  *
  * This matches `git hash-object <file>` without invoking git.
  */
-export function computeGitBlobSha1(data: Buffer): string {
+export function computeGitBlobSha1(data: Uint8Array): string {
   const header = Buffer.from(`blob ${data.byteLength}\0`, "utf-8");
   const hash = createHash("sha1").update(header).update(data).digest("hex");
   return `sha1:${hash}`;

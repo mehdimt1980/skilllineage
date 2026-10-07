@@ -4,24 +4,47 @@
   "description": "Trace copies, variants, and lineage evidence of AI Agent Skills. Deterministic fingerprinting for SKILL.md lineage tracking.",
   "license": "MIT",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "bin": {
     "skilllineage": "./dist/cli/main.js"
   },
   "exports": {
-    ".": "./dist/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "README.de.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=22"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mehdimt1980/skilllineage.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mehdimt1980/skilllineage/issues"
+  },
+  "homepage": "https://github.com/mehdimt1980/skilllineage#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc",
+    "clean": "node tools/clean-dist.mjs",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run && python -m unittest tools/test_benchmark_gitskills.py tools/test_benchmark_microshards.py tools/test_audit_gitskills_history.py",
     "test:watch": "vitest",
+    "release:check": "npm run lint && npm run typecheck && npm test && npm run build && node tools/test-package.mjs",
     "prepack": "npm run build"
   },
   "devDependencies": {
