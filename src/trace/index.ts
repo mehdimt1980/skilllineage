@@ -23,4 +23,7 @@ export type {
   TraceEvidenceGraphEdge,
   TraceEvidenceGraphSimilarityEdge,
   TraceEvidenceGraphTemporalEdge,
+  TraceEvidenceSummary,
+  TraceEvidenceSummaryFact,
+  TraceEvidenceSummaryLimitation,
 } from "./types.js";

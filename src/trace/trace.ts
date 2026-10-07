@@ -34,6 +34,9 @@ import type {
 } from "../variant/index.js";
 import type {
   TraceReport,
+  TraceQuery,
+  TraceMatch,
+  TraceProfiling,
   SameInstructionsMatch,
   VariantCandidate,
   TraceProfilingOptions,
@@ -41,6 +44,7 @@ import type {
 import { attachVariantHistory, historyEvidence, instructionHistoryEvidence } from "./history.js";
 import { buildTemporalEvidence } from "./temporal.js";
 import { buildEvidenceGraph } from "./evidence-graph.js";
+import { buildEvidenceSummary } from "./evidence-summary.js";
 
 /**
  * Trace a local skill against a dual (exact + instructions) index.
@@ -111,18 +115,17 @@ export async function traceSkill(
         .filter((event) => event.shardKind === "history_exact").length;
       profile.counts.historyInstructionShardCount = 0;
     }
-    if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
-    return {
-      schemaVersion: "0.4",
+    return finalizeTraceReport(
       query,
-      match: {
+      {
         type: "exact",
         copyCount: exactEntry.copyCount,
         occurrences: exactEntry.occurrences,
         history,
       },
-      origin: { status: "not_inferred" },
-    };
+      profile,
+      totalStart,
+    );
   }
 
   const blobHashes = await timed("instructionLookupMs", () =>
@@ -143,13 +146,12 @@ export async function traceSkill(
       profile.counts.historyInstructionShardCount = profile.shardReads.slice(historyReadStart)
         .filter((event) => event.shardKind === "history_instructions").length;
     }
-    if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
-    return {
-      schemaVersion: "0.4",
+    return finalizeTraceReport(
       query,
-      match: { ...sameInstructionsMatch, history },
-      origin: { status: "not_inferred" },
-    };
+      { ...sameInstructionsMatch, history },
+      profile,
+      totalStart,
+    );
   }
 
   const rawSkill = await readFile(
@@ -241,11 +243,9 @@ export async function traceSkill(
       profile.counts.evidenceGraphSimilarityEdgeCount = evidenceGraph.similarityEdgeCount;
       profile.counts.evidenceGraphTemporalObservationEdgeCount = evidenceGraph.temporalObservationEdgeCount;
     }
-    if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
-    return {
-      schemaVersion: "0.4",
+    return finalizeTraceReport(
       query,
-      match: {
+      {
         type: "variant_candidates",
         method: "bottom-k-token-shingles-v1",
         approximate: true,
@@ -254,19 +254,44 @@ export async function traceSkill(
         temporalEvidence,
         evidenceGraph,
       },
-      origin: { status: "not_inferred" },
-    };
+      profile,
+      totalStart,
+    );
   }
 
-  if (profile) profile.stages.totalTraceMs = performance.now() - totalStart;
-  return {
-    schemaVersion: "0.4",
+  return finalizeTraceReport(
     query,
-    match: {
+    {
       type: "none",
       copyCount: 0,
       occurrences: [],
     },
+    profile,
+    totalStart,
+  );
+}
+
+function finalizeTraceReport(
+  query: TraceQuery,
+  match: TraceMatch,
+  profile?: TraceProfiling,
+  totalStart?: number,
+): TraceReport {
+  const summaryStart = profile ? performance.now() : 0;
+  const evidenceSummary = buildEvidenceSummary(match);
+  if (profile) {
+    profile.stages.evidenceSummaryMs = performance.now() - summaryStart;
+    profile.counts.evidenceSummaryFactCount = evidenceSummary.facts.length;
+    profile.counts.evidenceSummaryLimitationCount = evidenceSummary.limitations.length;
+    if (totalStart !== undefined) {
+      profile.stages.totalTraceMs = performance.now() - totalStart;
+    }
+  }
+  return {
+    schemaVersion: "0.5",
+    query,
+    match,
+    evidenceSummary,
     origin: { status: "not_inferred" },
   };
 }
