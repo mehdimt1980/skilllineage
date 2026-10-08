@@ -6,7 +6,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-SkillLineage is an experimental open-source CLI for identifying how `SKILL.md` files relate to one another across the growing Agent Skills ecosystem.
+SkillLineage is an open-source CLI for identifying how `SKILL.md` files relate to one another across the growing Agent Skills ecosystem.
 
 It uses deterministic fingerprints and normalized instruction matching to answer questions such as:
 
@@ -88,11 +88,11 @@ The long-term goal is to make Skill provenance easier to inspect without dependi
 
 ## Project status
 
-SkillLineage is currently in **v1.0.0 release candidate** validation.
+SkillLineage **v1.0.0 was published on 2026-10-08**. See the [GitHub Release](https://github.com/mehdimt1980/skilllineage/releases/tag/v1.0.0) and the [first-user Quickstart](docs/quickstart.md).
 
 ## Current Specification & Compatibility
 
-- **Current package version**: `1.0.0` (v1.0.0 release candidate)
+- **Current package version**: `1.0.0` (released 2026-10-08)
 - **Current index schema**: `0.5`
 - **Current trace report schema**: `0.5`
 - **Current reader compatibility**: requires index schema `0.5`
@@ -121,18 +121,18 @@ Implemented capabilities:
 
 ## Installation & Runtime Requirements
 
-### For End Users & Consumers (CLI / Node.js API — Post-Publication)
+### For End Users & Consumers (CLI / Node.js API)
 
 - **Node.js >= 22**
 - Zero production dependencies. Python is **not** required for running the CLI or importing the programmatic API (`fingerprint`, `compareSkills`, `traceSkill`).
 
-Once published to npm, SkillLineage can be run directly via `npx` or installed into a project:
+SkillLineage is available on npm. Run it directly with `npx` or install it into a project. For a reproducible walkthrough including a synthetic schema-0.5 trace index, follow the **[five-minute Quickstart](docs/quickstart.md)**:
 
 ```bash
 # Run directly via npx without prior installation
-npx skilllineage --version
-npx skilllineage --help
-npx skilllineage fingerprint ./my-skill
+npx --yes skilllineage@1.0.0 --version
+npx --yes skilllineage@1.0.0 --help
+npx --yes skilllineage@1.0.0 fingerprint ./my-skill
 
 # Or install locally
 npm install skilllineage
@@ -148,7 +148,7 @@ A standard npm package installation provides the CLI and programmatic analysis e
   python tools/build-gitskills-index.py /path/to/gitskills.db ./gitskills-index
   ```
 - The Python builder is part of the source repository, **not** the npm tarball. Run it from a repository checkout with an existing GitSkills SQLite database; npm installation alone neither downloads the dataset nor builds the index.
-- Operating global trace requires generating or supplying a local schema-0.5 index directory.
+- Operating global trace requires generating or supplying a local schema-0.5 index directory. To try `exact` and `same_instructions` without GitSkills, generate the [synthetic demo](docs/quickstart.md).
 
 ### For Repository Development & Offline Tooling
 
