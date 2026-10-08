@@ -70,6 +70,8 @@ The generator refuses to overwrite existing directories.
 
 ## After the first run
 
+For an official smaller real-data sample and integrity verification, follow [Index accessibility](index-accessibility.md).
+
 For real-data global tracing, prepare a **separate** index from GitSkills
 with the offline Python builder in this repository. It requires a preexisting
 GitSkills SQLite database and a compatible schema-0.5 index:
