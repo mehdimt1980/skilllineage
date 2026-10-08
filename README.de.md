@@ -149,6 +149,7 @@ Eine Standardinstallation via npm enthält die CLI und die programmatische Analy
   ```
 - Der Python-Builder gehört zum Quellcode-Repository und ist **nicht** Teil des npm-Pakets. Er muss aus einem Repository-Checkout mit einer vorhandenen GitSkills-SQLite-Datenbank ausgeführt werden; die npm-Installation lädt den Datensatz nicht herunter und erstellt keinen Index.
 - Für globale Trace-Abfragen muss ein lokaler Schema-0.5-Index erzeugt oder bereitgestellt werden. Der [synthetische Quickstart](docs/quickstart.md) funktioniert ohne den GitSkills-Datensatz.
+- Für einen lokalen Index auf Basis der **offiziellen GitSkills-Stichprobe** (ohne vollständigen Datensatz) siehe die [Anleitung zu Index-Erstellung und SHA-256-Integritätsprüfung](docs/index-accessibility.md). Es wird kein fertiger öffentlicher Index bereitgestellt.
 
 ### Für Repository-Entwicklung & Offline-Werkzeuge
 
