@@ -76,4 +76,4 @@ CI runs this test on Ubuntu Node 22/24 and Windows Node 24. The test creates onl
 
 **Phase 14F follow-up:** See [synthetic distribution profile and decision gates](distribution-profile-decision.md). The profiling tool measures selected shard traffic and cache hits without integrating a network resolver into the production reader.
 
-**Next step (separate PR #19):** Measure how the fully synthetic resolver scales with many shards, benchmark cache hits/misses and network bytes, design an *opt-in* reader adapter without compromising error semantics, and present a final architecture decision. Do not deploy a public server unless the independent redistribution review is complete.
+**Historical roadmap (completed in PR #19):** Measure the synthetic resolver's shard traffic, cache hits/misses, and bounded scale behavior; record adapter completeness requirements and Go/No-Go findings. Do not deploy a public server unless the independent redistribution review is complete.
