@@ -12,6 +12,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const FORMAT = 'skilllineage-synthetic-distribution-v1';
+// A session is trusted only when constructed through pinned manifest verification.
+const PINNED_SESSION_BRAND = new WeakSet();
+export function isPinnedSyntheticSession(value) {
+  return value !== null && typeof value === 'object' && PINNED_SESSION_BRAND.has(value);
+}
 const MAX_MANIFEST_BYTES = 5 * 1024 * 1024;
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_ENTRIES = 100000;
@@ -280,11 +285,13 @@ export async function createPinnedSyntheticSession({
     }
     return { status: 'complete', snapshotId: manifest.snapshotId, verified };
   }
-  return Object.freeze({
+  const session = Object.freeze({
     snapshotId: manifest.snapshotId, fileCount: manifest.fileCount, compression,
     manifestValidations: 1,
     hydrate, resolve
   });
+  PINNED_SESSION_BRAND.add(session);
+  return session;
 }
 /** Backward-compatible one-off synthetic fetch; existing behavior is intact. */
 export async function hydrateSyntheticShard({
