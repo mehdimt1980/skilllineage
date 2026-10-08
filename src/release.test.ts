@@ -62,7 +62,7 @@ describe("Release Hardening & Package Invariants", () => {
   });
 
   describe("Version Consistency", () => {
-    it("keeps package, lockfile root, and exported versions aligned at the Phase 12 version", async () => {
+    it("keeps package, lockfile root, and exported versions aligned at the v1.0.0 release candidate version", async () => {
       const pkg = JSON.parse(
         await readFile(path.join(rootDir, "package.json"), "utf-8"),
       ) as { version: string };
@@ -73,7 +73,7 @@ describe("Release Hardening & Package Invariants", () => {
         packages?: Record<string, { version?: string }>;
       };
 
-      expect(pkg.version).toBe("0.1.0");
+      expect(pkg.version).toBe("1.0.0");
       expect(lock.version).toBe(pkg.version);
       expect(lock.packages?.[""]?.version).toBe(pkg.version);
       expect(VERSION).toBe(pkg.version);

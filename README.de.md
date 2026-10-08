@@ -88,11 +88,11 @@ Langfristig soll Skill-Herkunft leichter überprüfbar werden — ohne Abhängig
 
 ## Projektstatus
 
-SkillLineage befindet sich derzeit in der **Pre-1.0-Release-Härtung** (Release Candidate).
+SkillLineage befindet sich derzeit in der **v1.0.0-Release-Candidate-Validierung**.
 
 ## Aktuelle Spezifikation & Kompatibilität
 
-- **Aktuelle Paketversion**: `0.1.0` (v1 Release Candidate)
+- **Aktuelle Paketversion**: `1.0.0` (v1.0.0 Release Candidate)
 - **Aktuelles Indexschema**: `0.5`
 - **Aktuelles Trace-Report-Schema**: `0.5`
 - **Aktuelle Reader-Kompatibilität**: erfordert Indexschema `0.5`

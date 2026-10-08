@@ -88,11 +88,11 @@ The long-term goal is to make Skill provenance easier to inspect without dependi
 
 ## Project status
 
-SkillLineage is currently in **pre-1.0 release hardening**.
+SkillLineage is currently in **v1.0.0 release candidate** validation.
 
 ## Current Specification & Compatibility
 
-- **Current package version**: `0.1.0` (v1 release candidate)
+- **Current package version**: `1.0.0` (v1.0.0 release candidate)
 - **Current index schema**: `0.5`
 - **Current trace report schema**: `0.5`
 - **Current reader compatibility**: requires index schema `0.5`

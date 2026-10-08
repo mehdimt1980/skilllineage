@@ -1,6 +1,6 @@
 {
   "name": "skilllineage",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Trace copies, variants, and lineage evidence of AI Agent Skills. Deterministic fingerprinting for SKILL.md lineage tracking.",
   "license": "MIT",
   "type": "module",
