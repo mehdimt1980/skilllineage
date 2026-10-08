@@ -73,8 +73,8 @@ SkillLineage maintainers
 
 ## 5. Exit gates / next step
 
-- [x] Enumerate all 8 on-disk namespaces and the 14 exported type contracts.
-- [x] Label all 63 fields with qualitative exposure levels in a machine-readable inventory.
+- [x] Enumerate all 8 on-disk namespaces and the 15 exported type contracts.
+- [x] Label all 66 fields with qualitative exposure levels in a machine-readable inventory.
 - [x] Add a CI contract-coverage test that fails on unreviewed type or namespace changes.
 - [x] Identify privacy/licensing limitations and prepare (but do not send) an inquiry.
 - [ ] Obtain documented clarification / independent advice on derived-index redistribution.
