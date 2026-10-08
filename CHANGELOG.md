@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Initial Stable Release Candidate
 - First stable release candidate for SkillLineage (`v1.0.0`).
 - Establishes frozen public runtime API and strict NodeNext TypeScript declarations.
-- Complete semantic regression coverage for all trace match types (`exact`, `same_instructions`, `variant_candidates`, `none`).
+- Targeted deterministic, synthetic semantic regression tests spanning all trace match types (`exact`, `same_instructions`, `variant_candidates`, `none`); these do not replace full-dataset benchmark validation.
 
 ### Fingerprinting
 - Deterministic Skill fingerprinting generating canonical Git blob SHA-1 and normalized-instruction SHA-256 digests.
