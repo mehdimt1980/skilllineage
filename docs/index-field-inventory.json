@@ -1,0 +1,171 @@
+{
+  "format": "skilllineage-index-field-inventory-1",
+  "indexSchemaVersion": "0.5",
+  "reviewStatus": "technical_inventory_only",
+  "publicRedistribution": "BLOCKED_PENDING_REVIEW",
+  "riskLabels": {
+    "low": "Format or aggregate measurement; not automatically cleared for publication.",
+    "moderate": "May support linkage, inference, metadata exposure, or attribution confusion; requires contextual review.",
+    "high": "Direct identifiers, linkable content-derived sketches, or nested object containing them; public redistribution requires explicit risk/rights assessment."
+  },
+  "sourceOfTruth": [
+    "src/index/types.ts",
+    "tools/build-gitskills-index.py",
+    "src/index/reader.ts"
+  ],
+  "interfaces": {
+    "IndexManifest": {
+      "schemaVersion": "low",
+      "kind": "low",
+      "source": "moderate",
+      "indexes": "low",
+      "recordCount": "low",
+      "distinctHashCount": "low",
+      "instructionIndex": "low",
+      "variantIndex": "low",
+      "historyIndex": "low"
+    },
+    "HistoryIndexDescriptor": {
+      "algorithm": "low",
+      "exactRouting": "low",
+      "instructionRouting": "low",
+      "semantics": "low",
+      "timestampNormalization": "low"
+    },
+    "HistoryObservation": {
+      "repoFullName": "high",
+      "path": "high",
+      "firstCommitAt": "moderate",
+      "lastCommitAt": "moderate"
+    },
+    "HistorySummaryRecord": {
+      "totalLocationCount": "low",
+      "historyFetchedLocationCount": "low",
+      "usableLocationCount": "low",
+      "chronologyAnomalyCount": "low",
+      "conflictingLocationCount": "low",
+      "coverage": "low",
+      "earliestObserved": "high",
+      "latestObserved": "high"
+    },
+    "IndexSource": {
+      "name": "moderate",
+      "snapshot": "moderate",
+      "license": "moderate",
+      "url": "moderate"
+    },
+    "IndexDescriptors": {
+      "exact": "low",
+      "instructions": "low"
+    },
+    "IndexDescriptor": {
+      "algorithm": "low",
+      "shardPrefixLength": "low"
+    },
+    "InstructionIndexStats": {
+      "indexedDistinctContentCount": "low",
+      "skippedDistinctContentCount": "low"
+    },
+    "VariantIndexDescriptor": {
+      "algorithm": "low",
+      "shingleSize": "low",
+      "shingleHash": "low",
+      "sketchSize": "low",
+      "anchorCount": "low",
+      "maxAnchorPostings": "low",
+      "anchorShardRouting": "low",
+      "sketchShardRouting": "low",
+      "enrichment": "low",
+      "skippedHotAnchorCount": "low"
+    },
+    "IndexOccurrence": {
+      "repoFullName": "high",
+      "path": "high",
+      "locationClass": "moderate",
+      "stars": "moderate",
+      "firstCommitAt": "moderate",
+      "lastCommitAt": "moderate",
+      "historyFetched": "low"
+    },
+    "IndexHashEntry": {
+      "copyCount": "low",
+      "occurrences": "high"
+    },
+    "VariantSketchRecord": {
+      "instructionsSha256": "moderate",
+      "sketch": "high"
+    },
+    "VariantEnrichmentExample": {
+      "repoFullName": "high",
+      "path": "high",
+      "stars": "moderate"
+    },
+    "VariantEnrichmentRecord": {
+      "rawVariantCount": "low",
+      "copyCount": "low",
+      "examples": "high"
+    }
+  },
+  "namespaces": [
+    {
+      "directory": "manifest.json",
+      "entry": "IndexManifest",
+      "dynamicKey": "none",
+      "exposure": "schema and source provenance"
+    },
+    {
+      "directory": "exact/*.json.gz",
+      "entry": "IndexHashEntry",
+      "dynamicKey": "git blob SHA-1 (40 hex)",
+      "exposure": "exact content hashes and repo/path occurrences"
+    },
+    {
+      "directory": "instructions/*.json.gz",
+      "entry": "array of git blob SHA-1",
+      "dynamicKey": "normalized instruction SHA-256 (64 hex)",
+      "exposure": "cross-linking instruction and raw content hashes"
+    },
+    {
+      "directory": "variants/anchors/*.json.gz",
+      "entry": "variant-id array",
+      "dynamicKey": "96-bit shingle hash (24 hex)",
+      "exposure": "content-derived token-shingle retrieval linkage"
+    },
+    {
+      "directory": "variants/sketches/*/*.json.gz",
+      "entry": "VariantSketchRecord",
+      "dynamicKey": "96-bit variant identifier (24 hex)",
+      "exposure": "content-derived shingle sketches and instruction hash"
+    },
+    {
+      "directory": "variants/enrichment/*/*.json.gz",
+      "entry": "VariantEnrichmentRecord",
+      "dynamicKey": "normalized instruction SHA-256 (64 hex)",
+      "exposure": "aggregate counts and representative repo/path examples"
+    },
+    {
+      "directory": "history/exact/*/*.json.gz",
+      "entry": "HistorySummaryRecord",
+      "dynamicKey": "git blob SHA-1 (40 hex)",
+      "exposure": "grouped chronology and repository/path exemplars"
+    },
+    {
+      "directory": "history/instructions/*/*.json.gz",
+      "entry": "HistorySummaryRecord",
+      "dynamicKey": "normalized instruction SHA-256 (64 hex)",
+      "exposure": "grouped chronology and repository/path exemplars"
+    }
+  ],
+  "blockers": [
+    "License and scope of permission for derived hashes, instruction sketches, and combined metadata remain unverified.",
+    "Repo names, paths, and history examples can identify people, organizations, or sensitive context.",
+    "Content-derived hashes/sketches permit membership queries and cross-referencing even without raw SKILL.md text.",
+    "Attribution/citation, hosting jurisdiction, notices, removal/takedown and update policy are unapproved.",
+    "Any proposed minimized schema requires separate reader compatibility, quality, and privacy tests."
+  ],
+  "nonGoals": [
+    "No automatic distribution decision.",
+    "No GitSkills content or source archive is included.",
+    "No determination of GDPR status or legal compliance."
+  ]
+}
