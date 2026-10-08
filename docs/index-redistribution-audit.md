@@ -71,6 +71,8 @@ We are **not** hosting or releasing a GitSkills-derived index while these questi
 Best regards,
 SkillLineage maintainers
 
+See the [Phase 14E synthetic distribution architecture](distribution-architecture.md) for an opt-in, loopback-only proof of concept. The redistribution block remains unchanged.
+
 ## 5. Exit gates / next step
 
 - [x] Enumerate all 8 on-disk namespaces and the 15 exported type contracts.
