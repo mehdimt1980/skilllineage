@@ -45,6 +45,29 @@ The automated Ubuntu Node 22 CI step prints a JSON report directly in the job lo
 
 At review time, record at least one actual CI run ID and confirmed cold/warm request+byte counts here. Do not substitute guessed timings.
 
+## Observed synthetic CI measurements (PR #19)
+
+Source: [PR #19 CI run #37770012689](https://github.com/mehdimt1980/skilllineage/actions/runs/37770012689), job **Node 22 / Ubuntu**, commit \`6975e1c315791c99885657047b323abe2c496be6\`; Node \`v22.23.3\`, Linux x64. This is an **actual loopback-only synthetic execution**, not a new real-GitSkills benchmark. Results are a single job/run, not repeated trials or production timing targets.
+
+| Quantity | Observed value |
+| --- | ---: |
+| Original fixture files | 769 |
+| Added synthetic sparse shards | 256 |
+| Distribution file count | 1,025 |
+| Total compressed source index bytes | 24,170 |
+| Sidecar distribution manifest bytes | 165,457 |
+| Selected distinct shards | 32 |
+| Selected compressed shard bytes | 704 |
+| Cold HTTP GET requests / response-body bytes | **32 / 704 B** |
+| Warm cache HTTP GET requests / response-body bytes | **0 / 0 B** |
+| Cold p50 / p95 | **2.884 / 5.137 ms** |
+| Warm p50 / p95 | **1.612 / 2.549 ms** |
+| Cold / warm total measured operation time | 118.814 / 55.704 ms |
+
+**Decision derived from this evidence:** The cache correctly removes *application-layer HTTP body transfer* for verified repeat requests in this bounded synthetic setting. But the uncompressed JSON manifest is **165,457 bytes for 1,025 records**, despite the entire synthetic compressed index being only **24,170 bytes**, and the 32 selected shard bodies only **704 bytes**. The current prototype reads and validates the complete pinned manifest on *every* cold and warm shard lookup. A practical future design should first profile streaming/compact manifests and safe memoized manifest verification, rather than promise remote-data savings or scale from these tiny synthetic payloads.
+
+Numbers exclude HTTP headers, networking framing, potential TLS, unserved manifest delivery, and storage/CPU costs of larger shards. Real GitSkills sample/full index performance must be measured separately on appropriately licensed, locally controlled data.
+
 ## Why an opt-in reader adapter needs a separate contract
 
 **Partial cache != complete index.** The existing `trace --index` reader assumes a schema-0.5 directory with required fixed shard files. Handing it a partially hydrated directory can make missing evidence look like `none` or an index error, creating a dangerous completeness ambiguity.
