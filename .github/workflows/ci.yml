@@ -52,6 +52,8 @@ jobs:
         run: node tools/test-index-integrity.mjs
       - name: Benchmark aggregate redaction and guard tests
         run: node tools/test-benchmark-summary.mjs
+      - name: Index field inventory coverage audit
+        run: node tools/test-index-field-inventory.mjs
 
   windows-compatibility:
     name: Node 24 / Windows
@@ -83,3 +85,5 @@ jobs:
         run: node tools/test-index-integrity.mjs
       - name: Benchmark aggregate redaction and guard tests
         run: node tools/test-benchmark-summary.mjs
+      - name: Index field inventory coverage audit
+        run: node tools/test-index-field-inventory.mjs

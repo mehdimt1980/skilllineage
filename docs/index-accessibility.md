@@ -58,6 +58,8 @@ A schema-0.5 index is a directory with `manifest.json`, fixed gzip shards under 
 
 **Trust boundary:** the sidecar only establishes consistency with the supplied sidecar. It is **not** a digital signature or a guarantee of publisher authenticity. Attackers who can change both index and sidecar can forge a mutually consistent pair. Pin the expected sidecar digest through a trusted independent channel or establish signed provenance before public distribution.
 
+See the [Phase 14D technical field inventory and redistribution audit](index-redistribution-audit.md) for a source-code-backed list of stored fields, risk categories, unanswered licensing questions and exit gates.
+
 ## Rights and privacy gate — public hosting is NOT authorized
 
 The [GitSkills dataset card](https://huggingface.co/datasets/mvaccargiu/gitskills) makes a critical distinction: aggregated metadata is under **CC BY 4.0**, while included Skill text remains governed by its original repository license. Even a derived index containing hashes, text sketches, paths, repository names and history metadata must **not** automatically be treated as freely redistributable.
