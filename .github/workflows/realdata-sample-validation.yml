@@ -1,0 +1,77 @@
+name: Real GitSkills sample validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      samples:
+        description: 'Bounded sample count (manual, not a full-population audit)'
+        type: choice
+        required: true
+        default: '30'
+        options:
+          - '10'
+          - '30'
+          - '50'
+
+permissions:
+  contents: read
+
+jobs:
+  real-sample:
+    name: Pinned GitSkills SQLite sample / Ubuntu Node 22
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Check out SkillLineage
+        uses: actions/checkout@v7
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: npm ci
+      - name: Fetch pinned official sample, never commit to this repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-checkout --depth 1 https://github.com/giuseppedestefanis/gitskills-sample.git "$RUNNER_TEMP/gitskills-sample"
+          git -C "$RUNNER_TEMP/gitskills-sample" checkout --detach fff3df93beeee51a5444450891751f143e38da3e
+          test "$(git -C "$RUNNER_TEMP/gitskills-sample" rev-parse HEAD)" = "fff3df93beeee51a5444450891751f143e38da3e"
+          python -m zipfile -t "$RUNNER_TEMP/gitskills-sample/agent_skills_sample.zip"
+          mkdir "$RUNNER_TEMP/gitskills-unpacked"
+          python -m zipfile -e "$RUNNER_TEMP/gitskills-sample/agent_skills_sample.zip" "$RUNNER_TEMP/gitskills-unpacked"
+          test -f "$RUNNER_TEMP/gitskills-unpacked/agent_skills_sample.db"
+      - name: Build and verify local schema-0.5 index
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/check-gitskills-source.py "$RUNNER_TEMP/gitskills-unpacked/agent_skills_sample.db"
+          python tools/build-gitskills-index.py "$RUNNER_TEMP/gitskills-unpacked/agent_skills_sample.db" "$RUNNER_TEMP/real-gitskills-index" --source-name GitSkills-sample --source-snapshot July-2026-sample --source-url https://github.com/giuseppedestefanis/gitskills-sample
+          node tools/index-integrity.mjs generate "$RUNNER_TEMP/real-gitskills-index" "$RUNNER_TEMP/sample.index-integrity.json"
+          node tools/index-integrity.mjs verify "$RUNNER_TEMP/real-gitskills-index" "$RUNNER_TEMP/sample.index-integrity.json"
+      - name: Benchmark sample and write aggregate-only summary
+        shell: bash
+        env:
+          SAMPLES: ${{ inputs.samples }}
+        run: |
+          set -euo pipefail
+          node tools/run-realdata-validation.mjs \
+            --db "$RUNNER_TEMP/gitskills-unpacked/agent_skills_sample.db" \
+            --index "$RUNNER_TEMP/real-gitskills-index" \
+            --integrity "$RUNNER_TEMP/sample.index-integrity.json" \
+            --out "$RUNNER_TEMP/realdata-validation-results" \
+            --samples "$SAMPLES" \
+            --seed 42
+          test -s "$RUNNER_TEMP/realdata-validation-results/aggregate-only.json"
+      - name: Upload aggregate only, never raw benchmark or index
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-gitskills-sample-aggregate-only
+          path: ${{ runner.temp }}/realdata-validation-results/aggregate-only.json
+          if-no-files-found: error
+          retention-days: 7
