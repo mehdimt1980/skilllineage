@@ -155,6 +155,7 @@ A standard npm package installation provides the CLI and programmatic analysis e
 - A **synthetic-only distribution prototype** tests a pinned manifest, opt-in loopback-only selective shard fetches, and a verified local cache; see [distribution architecture](docs/distribution-architecture.md). It is not part of the npm runtime and does not host real data.
 - [Phase 14F synthetic distribution profiling and Go/No-Go](docs/distribution-profile-decision.md) measures loopback shard bytes and verified warm-cache behavior; it explicitly does not predict CDN cost or grant redistribution rights.
 - [Compact synthetic manifests and pinned snapshot sessions](docs/compact-manifest-session.md) provide optional gzip manifest size reduction and explicit `indeterminate` outcomes for incomplete shard resolution; the runtime remains offline and unchanged.
+- **Want to try the public CLI?** See [SkillLineage Developer Preview](docs/developer-preview.md) for a real npm install, five-minute synthetic demo, current global-index limitations and the user-feedback process. [PR #21 evidence-adapter scope](docs/completeness-aware-preview.md) is explicitly synthetic-only and does not modify `trace`.
 
 ### For Repository Development & Offline Tooling
 
