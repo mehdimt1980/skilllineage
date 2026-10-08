@@ -121,14 +121,34 @@ Implemented capabilities:
 
 ## Installation & Runtime Requirements
 
-### For End Users & Consumers (CLI / Node.js API)
+### For End Users & Consumers (CLI / Node.js API — Post-Publication)
 
 - **Node.js >= 22**
 - Zero production dependencies. Python is **not** required for running the CLI or importing the programmatic API (`fingerprint`, `compareSkills`, `traceSkill`).
 
+Once published to npm, SkillLineage can be run directly via `npx` or installed into a project:
+
 ```bash
+# Run directly via npx without prior installation
+npx skilllineage --version
+npx skilllineage --help
+npx skilllineage fingerprint ./my-skill
+
+# Or install locally
 npm install skilllineage
 ```
+
+### Trace Index Requirement & Index Acquisition
+
+A standard npm package installation provides the CLI and programmatic analysis engine, but does **not** bundle the large GitSkills index dataset.
+
+- The `skilllineage trace` command requires a local index directory formatted under **index schema 0.5** passed via `--index <dir>`.
+- Index datasets are generated offline from the [GitSkills dataset](https://huggingface.co/datasets/mvaccargiu/gitskills) using the repository's offline builder:
+  ```bash
+  python tools/build-gitskills-index.py /path/to/gitskills.db ./gitskills-index
+  ```
+- The Python builder is part of the source repository, **not** the npm tarball. Run it from a repository checkout with an existing GitSkills SQLite database; npm installation alone neither downloads the dataset nor builds the index.
+- Operating global trace requires generating or supplying a local schema-0.5 index directory.
 
 ### For Repository Development & Offline Tooling
 
