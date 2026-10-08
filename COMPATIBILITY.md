@@ -6,7 +6,7 @@ SkillLineage maintains separate, independent version spaces for its npm package 
 
 | Version Space | Current Version | Description |
 |---|---|---|
-| **npm package** | `0.1.0` (candidate for `1.0.0`) | SemVer package release version |
+| **npm package** | `1.0.0` (Release Candidate) | SemVer package release version |
 | **Index schema** | `0.5` | Format of static GitSkills-derived lookup shards and manifests |
 | **Trace report schema** | `0.5` | Structure of JSON reports returned by `traceSkill` and `skilllineage trace` |
 | **Fingerprint report schema** | `0.1` | Structure of JSON reports returned by `fingerprint` and `skilllineage fingerprint` |
