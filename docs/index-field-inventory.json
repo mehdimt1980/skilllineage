@@ -104,6 +104,11 @@
       "rawVariantCount": "low",
       "copyCount": "low",
       "examples": "high"
+    },
+    "VariantEnrichmentDescriptor": {
+      "algorithm": "low",
+      "shardRouting": "low",
+      "exampleLimit": "low"
     }
   },
   "namespaces": [
