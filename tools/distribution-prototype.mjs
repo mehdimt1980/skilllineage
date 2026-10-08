@@ -296,13 +296,16 @@ async function main() {
   if (action === 'prepare' && args.length === 2) {
     const result = await prepareDistribution(args[0], args[1]);
     console.log(JSON.stringify({ ...result, warning: 'Synthetic-only; not publisher-signed or public redistribution clearance' }, null, 2));
+  } else if (action === 'compact' && args.length === 3) {
+    const result = await compactSyntheticManifest(args[0], args[1], args[2]);
+    console.log(JSON.stringify({ ...result, warning: 'Pin authentic compressed bytes independently; no publisher signature or redistribution clearance' }, null, 2));
   } else if (action === 'fetch' && args.length === 6 && args[5] === '--allow-loopback-network') {
     console.log(JSON.stringify(await hydrateSyntheticShard({
       manifestFile: args[0], pinnedSha256: args[1], baseUrl: args[2],
       shardPath: args[3], cacheDir: args[4], allowLoopbackNetwork: true
     }), null, 2));
   } else {
-    console.error('Usage:\n  node tools/distribution-prototype.mjs prepare <synthetic-index> <new-distribution-manifest.json>\n  node tools/distribution-prototype.mjs fetch <manifest.json> <trusted-manifest-sha256> <http://127.0.0.1:PORT/> <shard-path> <existing-cache-dir> --allow-loopback-network');
+    console.error('Usage:\n  node tools/distribution-prototype.mjs prepare <synthetic-index> <new-distribution-manifest.json>\n  node tools/distribution-prototype.mjs compact <existing-manifest.json> <trusted-raw-sha256> <new-manifest.json.gz>\n  node tools/distribution-prototype.mjs fetch <manifest.json> <trusted-manifest-sha256> <http://127.0.0.1:PORT/> <shard-path> <existing-cache-dir> --allow-loopback-network');
     process.exitCode = 2;
   }
 }
