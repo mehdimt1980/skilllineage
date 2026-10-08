@@ -152,6 +152,7 @@ A standard npm package installation provides the CLI and programmatic analysis e
 - For a **real-data local index without downloading the full ~44 GB SQLite dataset**, follow the [official GitSkills sample-to-index setup and SHA-256 integrity guide](docs/index-accessibility.md). This does not provide a hosted index or full-dataset coverage.
 - To **validate quality and latency on your own real-data index**, run the [Phase 14C real-data benchmark protocol](docs/realdata-validation.md). A manual GitHub Actions workflow can also evaluate the pinned official sample and keep only an aggregate-only result.
 - **Index redistribution is not cleared.** See [Phase 14D field-level privacy, license and distribution-readiness audit](docs/index-redistribution-audit.md); existing schema-0.5 index shards must not be hosted or bundled publicly without further review.
+- A **synthetic-only distribution prototype** tests a pinned manifest, opt-in loopback-only selective shard fetches, and a verified local cache; see [distribution architecture](docs/distribution-architecture.md). It is not part of the npm runtime and does not host real data.
 
 ### For Repository Development & Offline Tooling
 

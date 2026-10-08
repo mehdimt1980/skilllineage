@@ -54,6 +54,8 @@ jobs:
         run: node tools/test-benchmark-summary.mjs
       - name: Index field inventory coverage audit
         run: node tools/test-index-field-inventory.mjs
+      - name: Synthetic distribution integrity and cache tests
+        run: node tools/test-distribution-prototype.mjs
 
   windows-compatibility:
     name: Node 24 / Windows
@@ -87,3 +89,5 @@ jobs:
         run: node tools/test-benchmark-summary.mjs
       - name: Index field inventory coverage audit
         run: node tools/test-index-field-inventory.mjs
+      - name: Synthetic distribution integrity and cache tests
+        run: node tools/test-distribution-prototype.mjs
