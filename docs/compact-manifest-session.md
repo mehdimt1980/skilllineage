@@ -60,6 +60,23 @@ It **never** returns \`match.type: "none"\`, does not infer absent skills and mu
 
 **Session security limitations:** an already-validated snapshot cannot retroactively honor publisher revocation or dataset takedown; this is an opt-in, short-lived local demonstration session with no remotely authenticated signer, governance or revocation mechanism. Even local shard routing may reveal information to its loopback server.
 
+## Observed CI evidence (synthetic only)
+
+From [PR #20 CI run #37771590342](https://github.com/mehdimt1980/skilllineage/actions/runs/37771590342), Ubuntu Node 22, on commit \`fabadbb60a8f9a2397ac0c277e0320fd760647cb\`:
+
+| Observed metric | Result |
+| --- | ---: |
+| Indexed synthetic files | 769 |
+| Uncompressed distribution manifest | **122,448 bytes** |
+| Gzip distribution manifest | **2,708 bytes** |
+| Compressed / original size ratio | **0.0221** (~97.8% reduction) |
+| Selected cold shard requests | **2 HTTP GETs** |
+| Warm cached requests | **0 HTTP GETs** |
+| Pinned manifest validations per session | **1** |
+| Session resolution for missing route | **indeterminate**, never an authoritative no-match |
+
+These are **actual GitHub CI measurements** on a highly repetitive synthetic JSON manifest. They are not a real-data compression guarantee or a CDN price estimate. The test also verified the gzip digest, deterministic output, decompression bound, post-construction manifest modification behavior, and tampered-cache fail-closed handling.
+
 ## Verification, metrics and decision
 
 \`node tools/test-compact-manifest-session.mjs\` checks deterministic gzip output, compression reduction, raw and compressed pin mismatch, refusal to overwrite, bounded decompression (zip-bomb guard), opt-in/local origin policy, immutable in-memory snapshot after source tampering, cache integrity and zero-repeat-HTTP behavior, missing-route handling, and absence of authoritative no-match outcomes.
