@@ -29,13 +29,15 @@ async function command(cmd, args, cwd = root) {
 }
 function argsFrom(argv) {
   const opts = { samples: 30, seed: 42 };
+  const seen = new Set();
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     if (!["--db", "--index", "--integrity", "--out", "--samples", "--seed"].includes(key))
       fail("Unknown option: " + key);
     if (!argv[i + 1] || argv[i + 1].startsWith("--")) fail("Missing value for " + key);
     const prop = key.slice(2);
-    if (Object.hasOwn(opts, prop)) fail("Duplicate option: " + key);
+    if (seen.has(prop)) fail("Duplicate option: " + key);
+    seen.add(prop);
     opts[prop] = argv[++i];
   }
   for (const p of ["db", "index", "integrity", "out"]) if(!opts[p]) fail("Missing --" + p);
@@ -64,7 +66,10 @@ try {
   // Inspect and verify first, before any benchmark or output generation.
   await command(process.env.SKILLLINEAGE_PYTHON || "python", ["tools/check-gitskills-source.py", db]);
   await command(process.execPath, ["tools/index-integrity.mjs", "verify", index, sidecar]);
-  await command(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "build"]);
+  if (process.platform === "win32") {
+    // Execute the trusted constant command via cmd.exe; do not pass user paths to it.
+    await command(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", "npm run build"]);
+  } else await command("npm", ["run", "build"]);
 
   await mkdir(out); // exclusive, after preflight
   console.log("Raw benchmark may contain repository/path identifiers; keep " + out + " PRIVATE.");
