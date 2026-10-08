@@ -5,10 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - Unreleased (Release Candidate)
+## [1.0.0] - 2026-10-08
 
-### Initial Stable Release Candidate
-- First stable release candidate for SkillLineage (`v1.0.0`).
+### Initial Stable Release
+- First stable release of SkillLineage (`v1.0.0`).
 - Establishes frozen public runtime API and strict NodeNext TypeScript declarations.
 - Targeted deterministic, synthetic semantic regression tests spanning all trace match types (`exact`, `same_instructions`, `variant_candidates`, `none`); these do not replace full-dataset benchmark validation.
 
