@@ -23,3 +23,7 @@ gitskills-sample-index/
 realdata-validation-results/
 private-benchmarks/
 raw-benchmark.json
+
+# Synthetic-only distribution manifests and local shard caches.
+synthetic-distribution.json
+.skilllineage-cache/
