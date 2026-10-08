@@ -96,13 +96,16 @@ function validateManifest(raw) {
   if (!d.files.some(x => x.path === 'manifest.json')) reject('Missing index manifest entry');
   return d;
 }
-export async function readPinnedManifest(filename, digestPin) {
+async function readPinnedManifestBytes(filename, digestPin) {
   if (typeof digestPin !== 'string' || !HEX_SHA.test(digestPin)) reject('A trusted SHA-256 digest pin is mandatory');
   const stat = await lstat(filename);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_MANIFEST_BYTES) reject('Manifest must be a bounded regular file');
   const bytes = await readFile(filename);
-  if (sha256(bytes) !== digestPin) reject('Distribution manifest SHA-256 pin mismatch');
-  return validateManifest(bytes.toString('utf8'));
+  if (bytes.length > MAX_MANIFEST_BYTES || sha256(bytes) !== digestPin) reject('Distribution manifest SHA-256 pin mismatch');
+  return bytes;
+}
+export async function readPinnedManifest(filename, digestPin) {
+  return validateManifest((await readPinnedManifestBytes(filename, digestPin)).toString('utf8'));
 }
 /**
  * Gzip is a transport optimization only. The SHA-256 pin is over the
@@ -112,8 +115,9 @@ export async function readPinnedManifest(filename, digestPin) {
 export async function compactSyntheticManifest(sourceFile, trustedSourceSha256, destinationFile) {
   const source = path.resolve(sourceFile), dest = path.resolve(destinationFile);
   if (source === dest) reject('Compressed output must differ from the original');
-  await readPinnedManifest(source, trustedSourceSha256);
-  const sourceBytes = await readFile(source);
+  // Parse, validate and compress exactly the *same* pinned bytes (no second read).
+  const sourceBytes = await readPinnedManifestBytes(source, trustedSourceSha256);
+  validateManifest(sourceBytes.toString('utf8'));
   const compressed = gzipSync(sourceBytes, { level: 9 });
   if (compressed.length > MAX_MANIFEST_BYTES) reject('Compressed manifest exceeds allowed size');
   const file = await open(dest, 'wx', 0o600);
