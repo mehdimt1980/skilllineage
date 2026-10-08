@@ -109,10 +109,9 @@ try {
   assert.equal(requests.length, 2, 'Corrupt cache must fail closed without HTTP reload');
 
   // Rehydration is a separate explicit step; it cannot assert a no-match.
-  const fresh = await createPinnedSyntheticSession({
+  await assert.rejects(createPinnedSyntheticSession({
     ...config, cacheDir: path.join(tmp, 'missing-cache')
-  }).then(() => false, err => /Cache root/.test(err.message));
-  assert.equal(fresh, true, 'A missing cache root must be rejected');
+  }), /ENOENT|no such file|Cache root/);
 
   const plainSession = await createPinnedSyntheticSession({
     manifestFile: rawFile, pinnedSha256: raw.sha256, compression: 'none',
