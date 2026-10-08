@@ -6,6 +6,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { lstat, mkdir, open, readFile, readdir, rm, link } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,14 +96,50 @@ function validateManifest(raw) {
   if (!d.files.some(x => x.path === 'manifest.json')) reject('Missing index manifest entry');
   return d;
 }
-export async function readPinnedManifest(filename, digestPin) {
+async function readPinnedManifestBytes(filename, digestPin) {
   if (typeof digestPin !== 'string' || !HEX_SHA.test(digestPin)) reject('A trusted SHA-256 digest pin is mandatory');
   const stat = await lstat(filename);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_MANIFEST_BYTES) reject('Manifest must be a bounded regular file');
   const bytes = await readFile(filename);
-  if (sha256(bytes) !== digestPin) reject('Distribution manifest SHA-256 pin mismatch');
-  return validateManifest(bytes.toString('utf8'));
+  if (bytes.length > MAX_MANIFEST_BYTES || sha256(bytes) !== digestPin) reject('Distribution manifest SHA-256 pin mismatch');
+  return bytes;
 }
+export async function readPinnedManifest(filename, digestPin) {
+  return validateManifest((await readPinnedManifestBytes(filename, digestPin)).toString('utf8'));
+}
+/**
+ * Gzip is a transport optimization only. The SHA-256 pin is over the
+ * *compressed* bytes, then decompression is bounded before schema validation.
+ * This is an opt-in source-only prototype, NOT an authenticated publisher format.
+ */
+export async function compactSyntheticManifest(sourceFile, trustedSourceSha256, destinationFile) {
+  const source = path.resolve(sourceFile), dest = path.resolve(destinationFile);
+  if (source === dest) reject('Compressed output must differ from the original');
+  // Parse, validate and compress exactly the *same* pinned bytes (no second read).
+  const sourceBytes = await readPinnedManifestBytes(source, trustedSourceSha256);
+  validateManifest(sourceBytes.toString('utf8'));
+  const compressed = gzipSync(sourceBytes, { level: 9 });
+  if (compressed.length > MAX_MANIFEST_BYTES) reject('Compressed manifest exceeds allowed size');
+  const file = await open(dest, 'wx', 0o600);
+  try { await file.writeFile(compressed); } finally { await file.close(); }
+  return { path: dest, sha256: sha256(compressed), compressedBytes: compressed.length, originalBytes: sourceBytes.length };
+}
+export async function readPinnedCompressedManifest(filename, trustedCompressedSha256) {
+  if (typeof trustedCompressedSha256 !== 'string' || !HEX_SHA.test(trustedCompressedSha256))
+    reject('A trusted SHA-256 digest pin is mandatory');
+  const info = await lstat(filename);
+  if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_MANIFEST_BYTES)
+    reject('Compressed manifest must be a bounded regular file');
+  const bytes = await readFile(filename);
+  if (bytes.length > MAX_MANIFEST_BYTES || sha256(bytes) !== trustedCompressedSha256)
+    reject('Compressed distribution manifest SHA-256 pin mismatch');
+  let plain;
+  try { plain = gunzipSync(bytes, { maxOutputLength: MAX_MANIFEST_BYTES }); }
+  catch (err) { reject('Invalid or overlong compressed distribution manifest: ' + err.message); }
+  if (plain.length > MAX_MANIFEST_BYTES) reject('Decompressed manifest too large');
+  return validateManifest(plain.toString('utf8'));
+}
+
 function assertLocalOrigin(raw) {
   let url;
   try { url = new URL(raw); } catch { reject('Invalid local HTTP URL'); }
@@ -163,9 +200,8 @@ async function boundedResponse(response, entry) {
   if (size !== entry.sizeBytes || hash.digest('hex') !== entry.sha256) reject('Downloaded shard fails SHA-256 or byte-count validation');
   return Buffer.concat(chunks, size);
 }
-export async function hydrateSyntheticShard({ manifestFile, pinnedSha256, baseUrl, shardPath, cacheDir, allowLoopbackNetwork = false }) {
+async function hydrateFromVerifiedManifest({ manifest, baseUrl, shardPath, cacheDir, allowLoopbackNetwork }) {
   if (!allowLoopbackNetwork) reject('Explicit --allow-loopback-network consent is required');
-  const manifest = await readPinnedManifest(manifestFile, pinnedSha256);
   if (!validRoute(shardPath)) reject('Invalid shard route');
   const entry = manifest.files.find(x => x.path === shardPath);
   if (!entry) reject('Shard absent from pinned manifest');
@@ -181,27 +217,99 @@ export async function hydrateSyntheticShard({ manifestFile, pinnedSha256, baseUr
   const handle = await open(temp, 'wx', 0o600);
   try { await handle.writeFile(bytes); } finally { await handle.close(); }
   try {
-    // Hard-link into place without overwriting an existing cache entry (also works with concurrent consumers).
+    // Exclusive install: concurrent clients must agree on the exact verified bytes.
     try { await link(temp, finalPath); }
-    catch(err) {
+    catch (err) {
       if (err?.code !== 'EEXIST') throw err;
       if (!await readCached(finalPath, entry)) reject('Cache raced with a nonmatching entry');
     }
   } finally { await rm(temp, { force: true }); }
   return { status: 'downloaded_verified', path: finalPath, sha256: entry.sha256 };
 }
+/**
+ * Creates an explicit short-lived snapshot session: verifies the whole pinned
+ * manifest only once, then reuses the immutable validated in-memory record set.
+ * The manifest is never exposed to the caller for mutation.
+ *
+ * This session must not be treated as a complete index or a public trace API.
+ */
+export async function createPinnedSyntheticSession({
+  manifestFile, pinnedSha256, baseUrl, cacheDir,
+  compression = 'none', allowLoopbackNetwork = false
+}) {
+  if (!allowLoopbackNetwork) reject('Explicit --allow-loopback-network consent is required');
+  if (!['none', 'gzip'].includes(compression)) reject('Unsupported manifest compression');
+  assertLocalOrigin(baseUrl); // Check network policy before reading potentially untrusted files.
+  await cacheRootGuard(cacheDir);
+  const manifest = compression === 'gzip'
+    ? await readPinnedCompressedManifest(manifestFile, pinnedSha256)
+    : await readPinnedManifest(manifestFile, pinnedSha256);
+  const config = { manifest, baseUrl, cacheDir, allowLoopbackNetwork };
+  async function hydrate(shardPath) {
+    return hydrateFromVerifiedManifest({ ...config, shardPath });
+  }
+  /**
+   * Semantic boundary: a route that cannot be verified makes the entire
+   * requested set INDETERMINATE, never an authoritative no-match.
+   * Missing entries are not global absence.
+   */
+  async function resolve(requiredRoutes) {
+    if (!Array.isArray(requiredRoutes) || !requiredRoutes.length ||
+        requiredRoutes.length > 128 || new Set(requiredRoutes).size !== requiredRoutes.length ||
+        !requiredRoutes.every(validRoute)) {
+      return { status: 'indeterminate', snapshotId: manifest.snapshotId, reason: 'policy', missingRoutes: [] };
+    }
+    const missing = requiredRoutes.filter(route => !manifest.files.some(x => x.path === route));
+    if (missing.length) return {
+      status: 'indeterminate', snapshotId: manifest.snapshotId,
+      reason: 'missing_in_manifest', missingRoutes: missing
+    };
+    const verified = [];
+    for (const route of requiredRoutes) {
+      try {
+        const result = await hydrate(route);
+        verified.push({ route, status: result.status, sha256: result.sha256, path: result.path });
+      } catch (err) {
+        const reason = /integrity|sha-256|cache|mismatch|size|corrupt|digest/i.test(err?.message ?? '')
+          ? 'integrity' : /fetch|http|timeout|network/i.test(err?.message ?? '') ? 'network' : 'unavailable';
+        return {
+          status: 'indeterminate', snapshotId: manifest.snapshotId,
+          reason, missingRoutes: requiredRoutes.filter(route => !verified.some(v => v.route === route))
+        };
+      }
+    }
+    return { status: 'complete', snapshotId: manifest.snapshotId, verified };
+  }
+  return Object.freeze({
+    snapshotId: manifest.snapshotId, fileCount: manifest.fileCount, compression,
+    manifestValidations: 1,
+    hydrate, resolve
+  });
+}
+/** Backward-compatible one-off synthetic fetch; existing behavior is intact. */
+export async function hydrateSyntheticShard({
+  manifestFile, pinnedSha256, baseUrl, shardPath, cacheDir, allowLoopbackNetwork = false
+}) {
+  const session = await createPinnedSyntheticSession({
+    manifestFile, pinnedSha256, baseUrl, cacheDir, allowLoopbackNetwork
+  });
+  return session.hydrate(shardPath);
+}
 async function main() {
   const [action, ...args] = process.argv.slice(2);
   if (action === 'prepare' && args.length === 2) {
     const result = await prepareDistribution(args[0], args[1]);
     console.log(JSON.stringify({ ...result, warning: 'Synthetic-only; not publisher-signed or public redistribution clearance' }, null, 2));
+  } else if (action === 'compact' && args.length === 3) {
+    const result = await compactSyntheticManifest(args[0], args[1], args[2]);
+    console.log(JSON.stringify({ ...result, warning: 'Pin authentic compressed bytes independently; no publisher signature or redistribution clearance' }, null, 2));
   } else if (action === 'fetch' && args.length === 6 && args[5] === '--allow-loopback-network') {
     console.log(JSON.stringify(await hydrateSyntheticShard({
       manifestFile: args[0], pinnedSha256: args[1], baseUrl: args[2],
       shardPath: args[3], cacheDir: args[4], allowLoopbackNetwork: true
     }), null, 2));
   } else {
-    console.error('Usage:\n  node tools/distribution-prototype.mjs prepare <synthetic-index> <new-distribution-manifest.json>\n  node tools/distribution-prototype.mjs fetch <manifest.json> <trusted-manifest-sha256> <http://127.0.0.1:PORT/> <shard-path> <existing-cache-dir> --allow-loopback-network');
+    console.error('Usage:\n  node tools/distribution-prototype.mjs prepare <synthetic-index> <new-distribution-manifest.json>\n  node tools/distribution-prototype.mjs compact <existing-manifest.json> <trusted-raw-sha256> <new-manifest.json.gz>\n  node tools/distribution-prototype.mjs fetch <manifest.json> <trusted-manifest-sha256> <http://127.0.0.1:PORT/> <shard-path> <existing-cache-dir> --allow-loopback-network');
     process.exitCode = 2;
   }
 }
