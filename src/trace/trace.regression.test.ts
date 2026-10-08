@@ -688,6 +688,26 @@ describe("Phase 13A Semantic Trace Evidence Regression Coverage", () => {
       expect(report.match.candidateGenerationTruncated).toBe(false);
       expect(report.match.candidates).toHaveLength(2);
 
+      // Pin candidate identity, order, enrichment and observed histories to the
+      // fixture data; deriving expected identities from traceSkill output would
+      // allow a swapped or substituted candidate to escape this regression gate.
+      expect(report.match.candidates).toMatchObject([
+        {
+          instructionsSha256: `sha256:${cand2InstrHex}`,
+          rawVariantCount: cand2Enrichment.rawVariantCount,
+          copyCount: cand2Enrichment.copyCount,
+          examples: cand2Enrichment.examples,
+          history: { status: "available", semantics: "observed_not_origin", ...cand2History },
+        },
+        {
+          instructionsSha256: `sha256:${cand1InstrHex}`,
+          rawVariantCount: cand1Enrichment.rawVariantCount,
+          copyCount: cand1Enrichment.copyCount,
+          examples: cand1Enrichment.examples,
+          history: { status: "available", semantics: "observed_not_origin", ...cand1History },
+        },
+      ]);
+
       const firstCandidate = report.match.candidates[0];
       const secondCandidate = report.match.candidates[1];
 
