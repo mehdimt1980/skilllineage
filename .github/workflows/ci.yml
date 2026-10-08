@@ -56,6 +56,11 @@ jobs:
         run: node tools/test-index-field-inventory.mjs
       - name: Synthetic distribution integrity and cache tests
         run: node tools/test-distribution-prototype.mjs
+      - name: Synthetic distribution scale profiling regression
+        run: node tools/test-synthetic-distribution-profile.mjs
+      - name: Record reproducible synthetic profile (Node 22)
+        if: matrix.node == 22
+        run: node tools/profile-synthetic-distribution.mjs --samples 32 --extra-shards 256
 
   windows-compatibility:
     name: Node 24 / Windows
@@ -91,3 +96,5 @@ jobs:
         run: node tools/test-index-field-inventory.mjs
       - name: Synthetic distribution integrity and cache tests
         run: node tools/test-distribution-prototype.mjs
+      - name: Synthetic distribution scale profiling regression
+        run: node tools/test-synthetic-distribution-profile.mjs
