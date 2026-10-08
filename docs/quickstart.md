@@ -89,6 +89,8 @@ Remember: exact matches, instruction similarities and dataset observation
 orders are **evidence, not proof of original authorship, plagiarism,
 ancestry or the direction of copying**.
 
+For a concise **share-with-developers** introduction and issue-report checklist, see the [Developer Preview handoff](developer-preview.md). The [synthetic completeness-aware adapter](completeness-aware-preview.md) is separate from the released `trace` command.
+
 ## For contributors
 
 The repository also runs a cross-platform smoke test against the immutable
