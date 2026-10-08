@@ -46,6 +46,10 @@ jobs:
         run: npm run build
       - name: Package smoke test
         run: node tools/test-package.mjs
+      - name: GitSkills SQLite preflight synthetic tests
+        run: python -m unittest tools/test_check_gitskills_source.py
+      - name: Index integrity synthetic tests
+        run: node tools/test-index-integrity.mjs
 
   windows-compatibility:
     name: Node 24 / Windows
@@ -71,3 +75,7 @@ jobs:
         run: npm run build
       - name: Package smoke test
         run: node tools/test-package.mjs
+      - name: GitSkills SQLite preflight synthetic tests
+        run: python -m unittest tools/test_check_gitskills_source.py
+      - name: Index integrity synthetic tests
+        run: node tools/test-index-integrity.mjs

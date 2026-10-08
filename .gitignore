@@ -8,3 +8,13 @@ coverage/
 .skilllineage-demo/
 __pycache__/
 *.py[cod]
+
+# Local third-party datasets and derived indexes (never commit).
+gitskills-sample/
+gitskills-sample-index/
+*.index-integrity.json
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
