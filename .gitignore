@@ -18,3 +18,8 @@ gitskills-sample-index/
 *.db-shm
 *.sqlite
 *.sqlite3
+
+# Private real-data benchmark runs (contain sampled repository/path identifiers).
+realdata-validation-results/
+private-benchmarks/
+raw-benchmark.json
