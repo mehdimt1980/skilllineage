@@ -88,11 +88,11 @@ Langfristig soll Skill-Herkunft leichter überprüfbar werden — ohne Abhängig
 
 ## Projektstatus
 
-SkillLineage befindet sich derzeit in der **v1.0.0-Release-Candidate-Validierung**.
+SkillLineage **v1.0.0 wurde am 08.10.2026 veröffentlicht**. Siehe [GitHub Release](https://github.com/mehdimt1980/skilllineage/releases/tag/v1.0.0) und [Quickstart mit synthetischem Beispiel](docs/quickstart.md).
 
 ## Aktuelle Spezifikation & Kompatibilität
 
-- **Aktuelle Paketversion**: `1.0.0` (v1.0.0 Release Candidate)
+- **Aktuelle Paketversion**: `1.0.0` (veröffentlicht am 08.10.2026)
 - **Aktuelles Indexschema**: `0.5`
 - **Aktuelles Trace-Report-Schema**: `0.5`
 - **Aktuelle Reader-Kompatibilität**: erfordert Indexschema `0.5`
@@ -121,18 +121,18 @@ Implementierte Fähigkeiten:
 
 ## Installation & Laufzeitanforderungen
 
-### Für Endanwender & Bibliotheksnutzer (CLI / Node.js API — nach Veröffentlichung)
+### Für Endanwender & Bibliotheksnutzer (CLI / Node.js API)
 
 - **Node.js >= 22**
 - Keine Produktionsabhängigkeiten (Zero Runtime Dependencies). Python wird für die Ausführung des CLI oder den Import der programmatischen API (`fingerprint`, `compareSkills`, `traceSkill`) **nicht** benötigt.
 
-Nach der Veröffentlichung auf npm kann SkillLineage direkt via `npx` ausgeführt oder in ein Projekt installiert werden:
+SkillLineage ist auf npm veröffentlicht und lässt sich direkt via `npx` ausführen oder in einem Projekt installieren. Der [Quickstart](docs/quickstart.md) demonstriert die CLI mit einem synthetischen Schema-0.5-Index:
 
 ```bash
 # Direkt via npx ausführen ohne vorherige Installation
-npx skilllineage --version
-npx skilllineage --help
-npx skilllineage fingerprint ./my-skill
+npx --yes skilllineage@1.0.0 --version
+npx --yes skilllineage@1.0.0 --help
+npx --yes skilllineage@1.0.0 fingerprint ./my-skill
 
 # Oder lokal installieren
 npm install skilllineage
@@ -148,7 +148,7 @@ Eine Standardinstallation via npm enthält die CLI und die programmatische Analy
   python tools/build-gitskills-index.py /pfad/zu/gitskills.db ./gitskills-index
   ```
 - Der Python-Builder gehört zum Quellcode-Repository und ist **nicht** Teil des npm-Pakets. Er muss aus einem Repository-Checkout mit einer vorhandenen GitSkills-SQLite-Datenbank ausgeführt werden; die npm-Installation lädt den Datensatz nicht herunter und erstellt keinen Index.
-- Für globale Trace-Abfragen muss ein lokaler Schema-0.5-Index erzeugt oder bereitgestellt werden.
+- Für globale Trace-Abfragen muss ein lokaler Schema-0.5-Index erzeugt oder bereitgestellt werden. Der [synthetische Quickstart](docs/quickstart.md) funktioniert ohne den GitSkills-Datensatz.
 
 ### Für Repository-Entwicklung & Offline-Werkzeuge
 
