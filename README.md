@@ -145,8 +145,9 @@ A standard npm package installation provides the CLI and programmatic analysis e
 - The `skilllineage trace` command requires a local index directory formatted under **index schema 0.5** passed via `--index <dir>`.
 - Index datasets are generated offline from the [GitSkills dataset](https://huggingface.co/datasets/mvaccargiu/gitskills) using the repository's offline builder:
   ```bash
-  python tools/build-gitskills-index.py --db /path/to/gitskills.db --output ./gitskills-index
+  python tools/build-gitskills-index.py /path/to/gitskills.db ./gitskills-index
   ```
+- The Python builder is part of the source repository, **not** the npm tarball. Run it from a repository checkout with an existing GitSkills SQLite database; npm installation alone neither downloads the dataset nor builds the index.
 - Operating global trace requires generating or supplying a local schema-0.5 index directory.
 
 ### For Repository Development & Offline Tooling
