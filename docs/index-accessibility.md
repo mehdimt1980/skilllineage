@@ -82,3 +82,5 @@ Before posting any prebuilt GitSkills index for public download, review:
 - **Index returns `none`:** no match in that **specific dataset snapshot**, not evidence of global uniqueness.
 
 For first-time users with no data download, see [the synthetic Quickstart](quickstart.md).
+
+To benchmark a locally built index against its own SQLite source—with explicit privacy controls and bounded samples—see [Phase 14C real-data validation](realdata-validation.md).
