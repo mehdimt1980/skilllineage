@@ -5,6 +5,7 @@ Does not validate content provenance, dataset completeness, privacy or rights.
 """
 import argparse
 import sqlite3
+from contextlib import closing
 import sys
 from pathlib import Path
 
@@ -24,7 +25,7 @@ def preflight(database: Path) -> None:
             raise ValueError("File does not have a SQLite database header")
     # SQLite URI mode=ro guarantees source is not created or modified.
     uri = database.resolve().as_uri() + "?mode=ro"
-    with sqlite3.connect(uri, uri=True) as conn:
+    with closing(sqlite3.connect(uri, uri=True)) as conn:
         conn.execute("PRAGMA query_only=ON")
         for table, expected in REQUIRED.items():
             cols = {str(row[1]) for row in conn.execute("PRAGMA table_info(" + table + ")")}
