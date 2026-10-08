@@ -27,3 +27,5 @@ raw-benchmark.json
 # Synthetic-only distribution manifests and local shard caches.
 synthetic-distribution.json
 .skilllineage-cache/
+
+synthetic-distribution.json.gz
