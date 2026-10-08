@@ -1,6 +1,7 @@
 """Synthetic-only read-only GitSkills SQLite structural preflight tests."""
 import importlib.util
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,9 +20,10 @@ class SourceCheckTests(unittest.TestCase):
     def create(self, valid=True):
         fields = ("file_sha TEXT, repo_full_name TEXT, path TEXT, location_class TEXT, "
                   "content TEXT, first_commit_at TEXT, last_commit_at TEXT, history_fetched INTEGER")
-        with sqlite3.connect(self.file) as conn:
+        with closing(sqlite3.connect(self.file)) as conn:
             conn.execute("CREATE TABLE artifacts (" + (fields if valid else "file_sha TEXT, path TEXT") + ")")
             conn.execute("CREATE TABLE repos (full_name TEXT, stars INTEGER)")
+            conn.commit()
 
     def test_valid(self):
         self.create()
