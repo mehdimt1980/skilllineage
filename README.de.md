@@ -145,8 +145,9 @@ Eine Standardinstallation via npm enthält die CLI und die programmatische Analy
 - Der Befehl `skilllineage trace` erfordert ein lokales Index-Verzeichnis mit kompatiblem **Indexschema 0.5**, das über `--index <dir>` übergeben wird.
 - Indexdatensätze werden offline aus dem [GitSkills-Datensatz](https://huggingface.co/datasets/mvaccargiu/gitskills) mit dem Offline-Builder des Repositories generiert:
   ```bash
-  python tools/build-gitskills-index.py --db /pfad/zu/gitskills.db --output ./gitskills-index
+  python tools/build-gitskills-index.py /pfad/zu/gitskills.db ./gitskills-index
   ```
+- Der Python-Builder gehört zum Quellcode-Repository und ist **nicht** Teil des npm-Pakets. Er muss aus einem Repository-Checkout mit einer vorhandenen GitSkills-SQLite-Datenbank ausgeführt werden; die npm-Installation lädt den Datensatz nicht herunter und erstellt keinen Index.
 - Für globale Trace-Abfragen muss ein lokaler Schema-0.5-Index erzeugt oder bereitgestellt werden.
 
 ### Für Repository-Entwicklung & Offline-Werkzeuge
