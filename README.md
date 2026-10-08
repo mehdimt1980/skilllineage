@@ -150,6 +150,7 @@ A standard npm package installation provides the CLI and programmatic analysis e
 - The Python builder is part of the source repository, **not** the npm tarball. Run it from a repository checkout with an existing GitSkills SQLite database; npm installation alone neither downloads the dataset nor builds the index.
 - Operating global trace requires generating or supplying a local schema-0.5 index directory. To try `exact` and `same_instructions` without GitSkills, generate the [synthetic demo](docs/quickstart.md).
 - For a **real-data local index without downloading the full ~44 GB SQLite dataset**, follow the [official GitSkills sample-to-index setup and SHA-256 integrity guide](docs/index-accessibility.md). This does not provide a hosted index or full-dataset coverage.
+- To **validate quality and latency on your own real-data index**, run the [Phase 14C real-data benchmark protocol](docs/realdata-validation.md). A manual GitHub Actions workflow can also evaluate the pinned official sample and keep only an aggregate-only result.
 
 ### For Repository Development & Offline Tooling
 
