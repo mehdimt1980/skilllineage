@@ -7,6 +7,7 @@
 import { createHash } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
 import { gunzipSync } from 'node:zlib';
+import { isPinnedSyntheticSession } from './distribution-prototype.mjs';
 
 const HEX40 = /^[0-9a-f]{40}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -80,7 +81,7 @@ async function resolveVerifiedJson(session, route) {
  * is INDETERMINATE instead of a false global no-match.
  */
 export async function previewSyntheticEvidence(session, { gitBlobSha1, instructionsSha256 }) {
-  if (!session || typeof session.resolve !== 'function' ||
+  if (!isPinnedSyntheticSession(session) ||
       session.snapshotId !== 'synthetic-v1' ||
       !HEX40.test(gitBlobSha1) || !HEX64.test(instructionsSha256)) {
     return indeterminate(session?.snapshotId ?? 'untrusted', 'invalid_input_or_session', []);
